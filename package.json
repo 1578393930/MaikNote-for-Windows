@@ -12,11 +12,13 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "build:win": "npm run tauri build",
     "build:mac": "npm run tauri build -- --target aarch64-apple-darwin",
     "sync-version": "node scripts/sync-version.js",
     "build:guide": "node scripts/build-guide.mjs",
     "pretauri": "npm run sync-version",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -62,10 +64,13 @@
     "@tauri-apps/cli": "^2",
     "@unocss/preset-icons": "^66.6.6",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.6.0",
+    "jsdom": "^29.1.1",
     "patch-package": "^8.0.1",
     "typescript": "~5.6.2",
     "unocss": "^66.6.6",
     "vite": "^6.0.3",
+    "vitest": "^5.1.0",
     "vue-tsc": "^2.1.10"
   }
 }

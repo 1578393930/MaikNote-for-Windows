@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import type { NoteMetadata, DirectoryData, NoteFileEntry } from '@/types/note'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -249,10 +249,10 @@ export function useFileSystem() {
     try {
       const path = await getContentPath()
       await safeInvoke<string>('save_image', { basePath: path, imageData, filename })
-      // Return asset:// URL for Tauri to serve the file
-      // Ensure proper URL encoding and single slash after localhost
-      const encodedPath = encodeURIComponent(`${path}/images/${filename}`)
-      return `asset://localhost/${encodedPath}`
+      // 平台感知的 asset URL：Windows WebView2 上 convertFileSrc 会返回
+      // http://asset.localhost/...（asset:// 自定义 scheme 在 WebView2 里无法加载）
+      const fullPath = `${path}/images/${filename}`
+      return convertFileSrc(fullPath)
     } catch (e) {
       console.error('Failed to save image:', e)
       throw new Error('Failed to save image')

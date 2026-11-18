@@ -2,7 +2,7 @@
 name = "maiknote"
 version = "0.10.21"
 description = "A macOS Markdown note-taking app"
-authors = ["april"]
+authors = ["sansui"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -32,12 +32,19 @@ tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
+# WebDAV 同步：multistatus 解析 / HTTP 日期 / URL 解析 / 冲突副本 id
+regex = "1"
+httpdate = "1"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
 if-addrs = "0.13"
-cocoa = "0.25"
 window-vibrancy = "0.5"
+# 跨平台回收站（Windows 走系统回收站）
+trash = "5"
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.25"
 objc2 = "0.6"
 objc2-foundation = "0.3"
-[target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.5"
 libc = "0.2"
 

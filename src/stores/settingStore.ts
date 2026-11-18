@@ -10,6 +10,7 @@ import {
   type NoteLogoStyle,
 } from '@/utils/noteLogoPresets'
 import { clampTabSize } from '@/components/Editor/tabInsert'
+import { isMac } from '@/utils/platform'
 
 export type Theme = 'light' | 'dark' | 'auto'
 
@@ -40,7 +41,7 @@ export type ShortcutScope = 'global' | 'app'
 export type PinOffBehavior = 'show' | 'hide'
 
 /** 快捷键默认值（空字符串表示不设置该快捷键） */
-export const DEFAULT_SHORTCUTS: ShortcutSettings = {
+const MAC_DEFAULT_SHORTCUTS: ShortcutSettings = {
   showMain: 'Option+Cmd+A',
   prevNote: 'Cmd+[',
   nextNote: 'Cmd+]',
@@ -56,6 +57,28 @@ export const DEFAULT_SHORTCUTS: ShortcutSettings = {
   toggleSidebar: 'Cmd+\\',
   edgePanel: '',
 }
+
+/** Windows 键位：Ctrl 体系；Win 键被系统保留，全局快捷键一律 Ctrl+Alt 组合 */
+const WIN_DEFAULT_SHORTCUTS: ShortcutSettings = {
+  showMain: 'Ctrl+Alt+A',
+  prevNote: 'Ctrl+[',
+  nextNote: 'Ctrl+]',
+  prevDirectory: 'Alt+Ctrl+[',
+  nextDirectory: 'Alt+Ctrl+]',
+  newNote: 'Ctrl+N',
+  newNoteBefore: 'Ctrl+Shift+N',
+  deleteNote: 'Ctrl+Backspace',
+  pin: 'Ctrl+Alt+P',
+  lock: 'Ctrl+L',
+  toggleSource: 'Ctrl+/',
+  centerWindow: 'Ctrl+Alt+Shift+A',
+  toggleSidebar: 'Ctrl+\\',
+  edgePanel: '',
+}
+
+export const DEFAULT_SHORTCUTS: ShortcutSettings = isMac
+  ? MAC_DEFAULT_SHORTCUTS
+  : WIN_DEFAULT_SHORTCUTS
 
 export type CodeTheme =
   | 'github'
@@ -102,6 +125,13 @@ export function clampNoteBorderWidth(width: unknown): number {
   const value = Number(width)
   if (!Number.isFinite(value)) return 8
   return Math.min(10, Math.max(0, Math.round(value)))
+}
+
+/** 通用数值钳制：脏值 / 越界值回落到默认（localStorage 手改容错） */
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return fallback
+  return Math.min(max, Math.max(min, num))
 }
 
 /** 文件树字号：11–18px，0.5 一档；12.5 是原来的视觉基准 */
@@ -182,6 +212,15 @@ export interface AppSettings {
   aiPromptPrompt: string
   // 百度搜索设置
   baiduSearchKey: string
+  // WebDAV 同步
+  webdavEnabled: boolean // 总开关
+  webdavUrl: string // 服务器地址，如 https://dav.jianguoyun.com/dav/
+  webdavUsername: string // 账号（坚果云为注册邮箱）
+  webdavPassword: string // 密码（坚果云为官网生成的应用密码）
+  webdavRemoteDir: string // 远端同步根目录名
+  webdavAllowInsecure: boolean // 信任自签名证书（自建服务用）
+  webdavSyncOnStart: boolean // 启动时自动同步一次
+  webdavAutoIntervalMin: number // 自动同步间隔（分钟，0=关闭）
 }
 
 export const useSettingStore = defineStore('setting', () => {
@@ -192,7 +231,7 @@ export const useSettingStore = defineStore('setting', () => {
     fontSize: 14,
     tabSize: 4,
     noteBorderWidth: 8,
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif',
     showGrid: false,
     translucent: true,
     windowAlpha: 1.0,
@@ -226,7 +265,7 @@ export const useSettingStore = defineStore('setting', () => {
     trayIconEnabled: true,
     closeBehavior: 'hide',
     rememberLastDirectory: false,
-    globalHotkey: 'Option+Cmd+A',
+    globalHotkey: isMac ? 'Option+Cmd+A' : 'Ctrl+Alt+A',
     autoSaveInterval: 500,
     autoDeleteDays: 0,
     codeTheme: 'tokyo-night-dark',
@@ -277,6 +316,15 @@ export const useSettingStore = defineStore('setting', () => {
         '若用户的提示词过于简单，主动补全合理的默认规则\n' +
         '若存在矛盾规则，以最后出现的为准并合并',
     baiduSearchKey: '',
+    // WebDAV 同步
+    webdavEnabled: false,
+    webdavUrl: '',
+    webdavUsername: '',
+    webdavPassword: '',
+    webdavRemoteDir: 'MaikNote',
+    webdavAllowInsecure: false,
+    webdavSyncOnStart: false,
+    webdavAutoIntervalMin: 0,
   })
 
   // Actions
@@ -338,6 +386,25 @@ export const useSettingStore = defineStore('setting', () => {
             typeof parsed.edgeEnabled === 'boolean' ? parsed.edgeEnabled : settings.value.edgeEnabled,
           edgeStripWidth:
             typeof parsed.edgeStripWidth === 'number' ? parsed.edgeStripWidth : settings.value.edgeStripWidth,
+          edgeWidth: clampNumber(parsed.edgeWidth ?? settings.value.edgeWidth, 120, 1200, settings.value.edgeWidth),
+          edgeTriggerSpan: clampNumber(
+            parsed.edgeTriggerSpan ?? settings.value.edgeTriggerSpan,
+            10,
+            100,
+            settings.value.edgeTriggerSpan,
+          ),
+          autoSaveInterval: clampNumber(
+            parsed.autoSaveInterval ?? settings.value.autoSaveInterval,
+            200,
+            10_000,
+            settings.value.autoSaveInterval,
+          ),
+          webdavAutoIntervalMin: clampNumber(
+            parsed.webdavAutoIntervalMin ?? settings.value.webdavAutoIntervalMin,
+            0,
+            1440,
+            settings.value.webdavAutoIntervalMin,
+          ),
           edgeStripColor:
             typeof parsed.edgeStripColor === 'string' && parsed.edgeStripColor
               ? parsed.edgeStripColor
@@ -385,7 +452,7 @@ export const useSettingStore = defineStore('setting', () => {
       fontSize: 14,
       tabSize: 4,
       noteBorderWidth: 8,
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif',
       showGrid: false,
       translucent: true,
       windowAlpha: 1.0,
@@ -419,7 +486,7 @@ export const useSettingStore = defineStore('setting', () => {
       trayIconEnabled: true,
       closeBehavior: 'hide',
       rememberLastDirectory: false,
-      globalHotkey: 'Option+Cmd+A',
+      globalHotkey: isMac ? 'Option+Cmd+A' : 'Ctrl+Alt+A',
       autoSaveInterval: 500,
       autoDeleteDays: 0,
       codeTheme: 'tokyo-night-dark',
@@ -470,6 +537,15 @@ export const useSettingStore = defineStore('setting', () => {
           '若用户的提示词过于简单，主动补全合理的默认规则\n' +
           '若存在矛盾规则，以最后出现的为准并合并',
       baiduSearchKey: '',
+      // WebDAV 同步
+      webdavEnabled: false,
+      webdavUrl: '',
+      webdavUsername: '',
+      webdavPassword: '',
+      webdavRemoteDir: 'MaikNote',
+      webdavAllowInsecure: false,
+      webdavSyncOnStart: false,
+      webdavAutoIntervalMin: 0,
     }
     saveSettings()
     // 重置 iCloud 中的 AI 配置和百度搜索密钥

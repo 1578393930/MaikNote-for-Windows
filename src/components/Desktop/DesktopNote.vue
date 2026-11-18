@@ -6,6 +6,7 @@ import { emit, emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { writeText as writeClipboardNative } from '@tauri-apps/plugin-clipboard-manager'
 import { useI18n } from 'vue-i18n'
 import { createPreviewMarkdown, toggleTaskLine } from '@/utils/markdownTasks'
+import { normalizeLegacyAssetUrls } from '@/utils/assetUrl'
 import { useTheme } from '@/composables/useTheme'
 import { adaptNoteColor } from '@/utils/noteColorTheme'
 import {
@@ -45,7 +46,8 @@ const html = computed(() => {
   if (!source) return ''
   const cached = mdCache.get(source)
   if (cached !== undefined) return cached
-  const rendered = md.render(source)
+  // Windows 上把旧内容的 asset:// 归一化为 http://asset.localhost/，否则图片裂图
+  const rendered = md.render(normalizeLegacyAssetUrls(source))
   if (mdCache.size > 40) mdCache.clear()
   mdCache.set(source, rendered)
   return rendered
@@ -75,6 +77,7 @@ const cardStyle = computed<Record<string, string>>(() => {
     background: bg,
     '--card-fg': light ? 'rgba(20, 20, 22, 0.92)' : 'rgba(245, 245, 247, 0.94)',
     '--card-fg-weak': light ? 'rgba(20, 20, 22, 0.55)' : 'rgba(245, 245, 247, 0.6)',
+    '--task-border': light ? '#555963' : '#b9bdc7',
   }
 })
 
@@ -128,6 +131,10 @@ async function copyAll(event: MouseEvent) {
   const target = event.target as HTMLElement | null
   // 点在任务复选框上不算「双击复制」
   if (target?.closest('button, input.md-task')) return
+  // 双击文字会先产生选词选区（拖选松开也已有选区复制）；
+  // 只有没有选区时（双击空白处 / 页脚）才复制全文，避免覆盖用户选中的内容
+  const selection = window.getSelection()
+  if (selection && !selection.isCollapsed && selection.toString().trim()) return
   const text = payload.value?.content?.trim()
   if (!text) return
   const ok = await writeClipboard(text)
@@ -321,6 +328,7 @@ onUnmounted(() => {
 }
 
 .card {
+  --task-border: #555963;
   position: relative;
   flex: 1;
   min-width: 0;
@@ -335,6 +343,7 @@ onUnmounted(() => {
 
 :global(html[data-theme='dark'] .card) {
   background: rgba(38, 38, 40, 0.92);
+  --task-border: #b9bdc7;
 }
 
 .desktop-note.is-hover .card {
@@ -504,7 +513,7 @@ onUnmounted(() => {
   margin: 3.2px 0 0;
   appearance: none;
   -webkit-appearance: none;
-  border: 1.4px solid var(--card-fg-weak, var(--color-border));
+  border: 1.5px solid var(--task-border);
   border-radius: 4px;
   background: transparent;
   cursor: pointer;

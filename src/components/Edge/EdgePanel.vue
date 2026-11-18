@@ -6,6 +6,8 @@ import { useI18n } from 'vue-i18n'
 import { useSettingStore } from '@/stores/settingStore'
 import type { EdgeNotePayload } from '@/composables/useEdgePanel'
 import { createPreviewMarkdown, toggleTaskLine } from '@/utils/markdownTasks'
+import TiptapEditor from '@/components/Editor/TiptapEditor.vue'
+import { writeText as writeClipboardNative } from '@tauri-apps/plugin-clipboard-manager'
 
 const { t, locale } = useI18n()
 const settingStore = useSettingStore()
@@ -138,9 +140,19 @@ function openNote(note: EdgeNotePayload) {
   collapse(0)
 }
 
-/** 写入剪贴板：优先 Clipboard API，失败退回 execCommand */
+/**
+ * 写入剪贴板。优先走 Rust 侧剪贴板插件：边缘面板经常不是焦点窗口，
+ * Clipboard API 在未聚焦文档上会 NotAllowedError，execCommand 兜底也常静默失败
+ * （桌面卡片窗口同样的问题，那边已用此方案修复）；再退 Clipboard API / execCommand。
+ */
 async function writeClipboard(text: string): Promise<boolean> {
   if (!text) return false
+  try {
+    await writeClipboardNative(text)
+    return true
+  } catch {
+    /* 退回 Clipboard API */
+  }
   try {
     await navigator.clipboard.writeText(text)
     return true
@@ -173,13 +185,7 @@ function flashNote(id: string, label: string) {
   }, 1400)
 }
 
-/** 编辑态粘贴：只插入纯文本，并阻止编辑器全局的 markdown 粘贴转换（否则会插入 `1\\.` 这类转义） */
-function onContentPaste(event: ClipboardEvent) {
-  const text = event.clipboardData?.getData('text/plain') ?? ''
-  if (!text) return
-  document.execCommand('insertText', false, text)
-  contentDirty = true
-}
+/** 编辑态粘贴由 Tiptap 原生处理（富内容 → Markdown），不再手工拦截 */
 
 function markCopied(id: string) {
   flashNote(id, t('edge.copied'))
@@ -247,17 +253,50 @@ async function toggleTask(note: EdgeNotePayload, checkbox: HTMLInputElement, eve
   await emit('maiknote:edit-note', { id: note.id, op: 'replace', text: next })
 }
 
+/** 进入编辑时的内容快照：编辑期间主窗口推送更新不会打断输入中的编辑器 */
+const editingInitial = ref('')
+/** 编辑器最新输出的 Markdown（提交用） */
+const editingDraft = ref('')
+/** 正在编辑的笔记对象（提交时用） */
+let editingNote: EdgeNotePayload | null = null
+
+/** 把编辑器里的最新 Markdown 回写给主窗口；返回是否真的写入了 */
+async function commitEditing(): Promise<boolean> {
+  cancelPendingCommit()
+  const note = editingNote
+  if (!note) return false
+  const dirty = contentDirty
+  contentDirty = false
+  editingId.value = null
+  editingNote = null
+  if (!dirty) return false
+  const text = editingDraft.value.replace(/\s+$/, '')
+  const current = note.content || ''
+  if (text === current) return false
+  // 本地先更新预览，主窗口回写后会把规范化内容推回来
+  note.content = text
+  await emit('maiknote:edit-note', { id: note.id, op: 'replace', text })
+  return true
+}
+
 async function beginEdit(note: EdgeNotePayload, event?: MouseEvent) {
   // 双击任务复选框不算「进入编辑」，否则勾一下就把卡片变成编辑态
   if ((event?.target as HTMLElement | null)?.closest('input.md-task')) return
   event?.preventDefault()
+  // 上一个卡片还在编辑且有改动：先落盘再切换，避免丢字
+  if (editingId.value && editingId.value !== note.id && contentDirty) {
+    await commitEditing()
+  }
   contentDirty = false
+  editingNote = note
+  editingInitial.value = note.content || ''
+  editingDraft.value = note.content || ''
   editingId.value = note.id
   await nextTick()
   const card = event
     ? (event.currentTarget as HTMLElement | null)?.closest('.note-card')
     : document.querySelector<HTMLElement>(`.note-card[data-note-id="${note.id}"]`)
-  const el = card?.querySelector<HTMLElement>('.card-content[contenteditable]')
+  const el = card?.querySelector<HTMLElement>('.ProseMirror')
   if (!el) return
   el.focus()
   const selection = window.getSelection()
@@ -271,30 +310,73 @@ async function beginEdit(note: EdgeNotePayload, event?: MouseEvent) {
 
 let contentDirty = false
 
-function onContentInput() {
+/** 富文本编辑器输出最新 Markdown */
+function onEditorUpdate(markdown: string) {
   contentDirty = true
+  editingDraft.value = markdown
 }
 
-async function commitEdit(note: EdgeNotePayload, event: FocusEvent) {
-  if (editingId.value === note.id) editingId.value = null
-  if (!contentDirty) return
-  contentDirty = false
-  const el = event.target as HTMLElement | null
-  if (!el) return
-  const text = (el.innerText || '').replace(/\u00a0/g, ' ').replace(/\s+$/, '')
-  const current = note.content || ''
-  if (!text || text === current) return
-  await emit('maiknote:edit-note', { id: note.id, op: 'paste', text, selection: current })
+async function commitEdit(note: EdgeNotePayload) {
+  if (editingId.value !== note.id) return
+  await commitEditing()
 }
 
-function cancelEdit(note: EdgeNotePayload, event: KeyboardEvent) {
+function cancelEdit(note: EdgeNotePayload) {
+  if (editingId.value !== note.id) return
   contentDirty = false
-  if (editingId.value === note.id) editingId.value = null
-  const el = event.target as HTMLElement | null
-  if (el) {
-    el.innerText = note.content || ''
-    el.blur()
+  cancelPendingCommit()
+  editingId.value = null
+  editingNote = null
+}
+
+/** 编辑器失焦后延迟提交的定时器：给斜杠菜单 / 气泡菜单的点击留出时间 */
+let commitTimer: number | null = null
+
+function cancelPendingCommit() {
+  if (commitTimer !== null) {
+    window.clearTimeout(commitTimer)
+    commitTimer = null
   }
+}
+
+/** 焦点没回到编辑器且所有弹层都关了，才真正提交 */
+function scheduleCommitIfIdle(note: EdgeNotePayload) {
+  cancelPendingCommit()
+  commitTimer = window.setTimeout(() => {
+    commitTimer = null
+    if (editingId.value !== note.id) return
+    const wrapper = document.querySelector(`.note-card[data-note-id="${note.id}"] .card-content.rich-editor`)
+    const active = document.activeElement
+    if (active && wrapper?.contains(active)) return // 焦点已回到编辑器
+    // 任何编辑器弹层还开着都不提交：那一下鼠标动作是在和弹层交互
+    const popupOpen = document.querySelector('.slash-command-popup, .note-link-popup, .bubble-menu, .tippy-box')
+    if (popupOpen) {
+      scheduleCommitIfIdle(note)
+      return
+    }
+    void commitEdit(note)
+  }, 220)
+}
+
+/** 编辑器失焦：焦点真的离开卡片（且不是点进任何弹层）才提交 */
+function onEditorFocusout(note: EdgeNotePayload, event: FocusEvent) {
+  if (editingId.value !== note.id) return
+  const next = event.relatedTarget as HTMLElement | null
+  if (next) {
+    const wrapper = event.currentTarget as HTMLElement | null
+    if (wrapper && wrapper.contains(next)) {
+      cancelPendingCommit()
+      return
+    }
+    // 气泡菜单 / 斜杠菜单 / 笔记链接选择器等通过 tippy 或直挂 body，点它们不算离开编辑
+    if (next.closest('.bubble-menu, .tippy-box, .ai-preview, .slash-command-popup, .note-link-popup')) {
+      cancelPendingCommit()
+      return
+    }
+  }
+  // relatedTarget 为空（点了非焦点元素）或去了白名单外：
+  // 弹层可能正开着（斜杠/气泡菜单），延迟判断，等弹层关闭且焦点没回来再提交
+  scheduleCommitIfIdle(note)
 }
 
 /** 选中即复制：拖选松开后把选中的文字写进剪贴板 */
@@ -334,6 +416,9 @@ async function copyNote(note: EdgeNotePayload) {
   const text = note.content || note.title || ''
   if (await writeClipboard(text)) markCopied(note.id)
 }
+
+// 「复制」按钮始终复制全文（可预测）；想复制选区用拖选松开的自动复制或右键菜单「复制」。
+// 不做选区感知：浏览器残留的旧选区会让「点复制却只得到一小段」看起来像复制失败。
 
 // ---------- 右键菜单 ----------
 
@@ -479,6 +564,7 @@ onMounted(async () => {
       stripWidth?: number
       stripColor?: string
       copyOnSelect?: boolean
+      language?: string
     }>(
       'maiknote:edge-prefs',
       event => {
@@ -492,6 +578,8 @@ onMounted(async () => {
         // 小白条粗细 / 颜色变了，折叠条厚度跟着算
         if (typeof prefs.stripWidth === 'number') stripW.value = prefs.stripWidth
         if (typeof prefs.stripColor === 'string' && prefs.stripColor) stripColor.value = prefs.stripColor
+        // 边缘窗口常驻，语言切换要实时跟上来
+        if (prefs.language === 'zh-CN' || prefs.language === 'en-US') locale.value = prefs.language
         syncStripThickness()
         // 折叠态下厚度变了要按新厚度归位
         if (!expanded.value) {
@@ -582,7 +670,7 @@ onUnmounted(() => {
           :key="note.id"
           class="note-card"
           :data-note-id="note.id"
-          :class="{ 'is-copied': flash?.id === note.id }"
+          :class="{ 'is-copied': flash?.id === note.id, 'is-editing-card': editingId === note.id }"
           @contextmenu.prevent="openMenu($event, note)"
         >
           <span class="card-accent" :style="{ background: note.color || 'var(--color-primary)' }" />
@@ -641,23 +729,29 @@ onUnmounted(() => {
               </button>
               <button
                 class="card-copy card-edit"
+                :class="{ 'is-done': editingId === note.id }"
                 type="button"
-                :title="t('edge.edit')"
-                @click.stop="beginEdit(note, $event)"
+                :title="editingId === note.id ? t('edge.done') : t('edge.edit')"
+                @click.stop="editingId === note.id ? commitEdit(note) : beginEdit(note, $event)"
               >
-                <span class="copy-label">{{ t('edge.edit') }}</span>
+                <span class="copy-label">{{ editingId === note.id ? t('edge.done') : t('edge.edit') }}</span>
               </button>
             </div>
-            <pre
+            <div
               v-if="editingId === note.id"
-              class="card-content is-editing"
-              contenteditable="plaintext-only"
-              spellcheck="false"
-              @input="onContentInput"
-              @blur="commitEdit(note, $event)"
-              @keydown.esc="cancelEdit(note, $event)"
-              @paste.stop.prevent="onContentPaste"
-            >{{ note.content }}</pre>
+              class="card-content is-editing rich-editor"
+              @focusout="onEditorFocusout(note, $event)"
+              @focusin="cancelPendingCommit"
+              @keydown.esc="cancelEdit(note)"
+            >
+              <TiptapEditor
+                :initial-content="editingInitial"
+                :font-size="settingStore.settings.fontSize"
+                :font-family="settingStore.settings.fontFamily"
+                :is-locked="false"
+                @update="onEditorUpdate"
+              />
+            </div>
             <div
               v-else
               class="card-content md"
@@ -984,6 +1078,26 @@ onUnmounted(() => {
   border-color: var(--color-primary, #3b82f6);
 }
 
+/* 编辑态：主题色描边 + 轻微光晕，与查看模式一眼区分 */
+.note-card.is-editing-card {
+  border-color: var(--color-primary, #3b82f6);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1.5px var(--color-primary, #3b82f6), 0 4px 14px rgba(59, 130, 246, 0.16);
+}
+
+/* 编辑中的「完成」按钮：实心主题色 */
+.card-copy.card-edit.is-done {
+  background: var(--color-primary, #3b82f6);
+  border-color: var(--color-primary, #3b82f6);
+  color: #fff;
+}
+
+.card-copy.card-edit.is-done:hover {
+  background: var(--color-primary, #3b82f6);
+  filter: brightness(1.08);
+  color: #fff;
+}
+
 .card-accent {
   flex: 0 0 3px;
   border-radius: 999px;
@@ -1047,6 +1161,59 @@ onUnmounted(() => {
   outline: 1px dashed var(--color-primary, #3b82f6);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* 富文本编辑态：复用主窗口 Tiptap 编辑器（所见即所得，输出 Markdown） */
+.card-content.rich-editor {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 4px 10px 8px;
+  cursor: text;
+}
+
+.card-content.rich-editor :deep(.ProseMirror) {
+  outline: none;
+  min-height: 110px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* 覆盖主窗口的大内边距（80/56px），面板宽度只有 320px，用紧凑边距 */
+.card-content.rich-editor :deep(.tiptap > .ProseMirror) {
+  padding: 2px 4px 10px;
+  border-radius: 0;
+}
+
+.card-content.rich-editor :deep(.tiptap h1),
+.card-content.rich-editor :deep(.tiptap h2),
+.card-content.rich-editor :deep(.tiptap h3) {
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+
+.card-content.rich-editor :deep(.tiptap p) {
+  margin: 5px 0;
+}
+
+.card-content.rich-editor :deep(.tiptap hr) {
+  margin: 10px 0;
+}
+
+.card-content.rich-editor :deep(.ProseMirror img) {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.card-content.rich-editor :deep(.ProseMirror pre) {
+  overflow-x: auto;
+  font-size: 0.9em;
+}
+
+/* 气泡菜单挂 body 下，字号随面板收紧一点 */
+.bubble-menu {
+  max-width: 300px;
+  flex-wrap: wrap;
 }
 
 .card-content.md {
@@ -1415,6 +1582,10 @@ onUnmounted(() => {
 :global([data-theme='dark'] .note-card) {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global([data-theme='dark'] .note-card.is-editing-card) {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 :global([data-theme='dark'] .note-card:hover) {

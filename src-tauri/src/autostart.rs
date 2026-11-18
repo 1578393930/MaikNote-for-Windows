@@ -3,7 +3,9 @@
 /// macOS 13+: 使用 SMAppService API，在系统设置 > 登录项中可见
 /// 回退方案: LaunchAgent plist（仅兼容旧版 macOS，用 open 命令启动避免终端弹出）
 
+#[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
+#[cfg(not(target_os = "windows"))]
 use std::fs;
 
 const APP_NAME: &str = "MaikNote";
@@ -71,6 +73,7 @@ mod apple {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 mod apple {
     pub fn is_available() -> bool { false }
     pub fn enable() -> Result<(), String> { Err("不支持".to_string()) }
@@ -79,8 +82,151 @@ mod apple {
     pub fn is_launched_by_launchd() -> bool { false }
 }
 
-// ====== 回退方案: LaunchAgent plist ======
+// ====== Windows: HKCU\Software\Microsoft\Windows\CurrentVersion\Run ======
 
+#[cfg(target_os = "windows")]
+mod windows_reg {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    const HKEY_CURRENT_USER: isize = 0x8000_0001;
+    const KEY_SET_VALUE: u32 = 0x0002;
+    const KEY_QUERY_VALUE: u32 = 0x0001;
+    const KEY_WRITE: u32 = 0x0002_0000 | KEY_SET_VALUE;
+    const KEY_READ: u32 = 0x0002_0000 | KEY_QUERY_VALUE;
+    const REG_SZ: u32 = 1;
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn RegCreateKeyExW(
+            hkey: isize,
+            sub_key: *const u16,
+            reserved: u32,
+            class: *const u16,
+            options: u32,
+            access: u32,
+            security: *const std::ffi::c_void,
+            out_key: *mut isize,
+            out_disposition: *mut u32,
+        ) -> i32;
+        fn RegSetValueExW(
+            hkey: isize,
+            value_name: *const u16,
+            reserved: u32,
+            value_type: u32,
+            data: *const u8,
+            data_len: u32,
+        ) -> i32;
+        fn RegOpenKeyExW(
+            hkey: isize,
+            sub_key: *const u16,
+            options: u32,
+            access: u32,
+            out_key: *mut isize,
+        ) -> i32;
+        fn RegQueryValueExW(
+            hkey: isize,
+            value_name: *const u16,
+            reserved: *mut u32,
+            out_type: *mut u32,
+            data: *mut u8,
+            data_len: *mut u32,
+        ) -> i32;
+        fn RegDeleteValueW(hkey: isize, value_name: *const u16) -> i32;
+        fn RegCloseKey(hkey: isize) -> i32;
+    }
+
+    fn wide(s: &str) -> Vec<u16> {
+        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    fn command() -> String {
+        let exe = std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        format!("\"{exe}\" {}", super::LAUNCH_ARG)
+    }
+
+    /// 启用：写入 HKCU Run 键
+    pub fn enable() -> Result<(), String> {
+        let mut hkey: isize = 0;
+        let sub = wide(RUN_KEY);
+        let status = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                sub.as_ptr(),
+                0,
+                std::ptr::null(),
+                0,
+                KEY_WRITE,
+                std::ptr::null(),
+                &mut hkey,
+                std::ptr::null_mut(),
+            )
+        };
+        if status != 0 {
+            return Err(format!("打开注册表失败 (code {status})"));
+        }
+        let name = wide(super::APP_NAME);
+        let mut cmd = command().encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let bytes: Vec<u8> = cmd.drain(..).flat_map(|u| u.to_le_bytes()).collect();
+        let status = unsafe {
+            RegSetValueExW(hkey, name.as_ptr(), 0, REG_SZ, bytes.as_ptr(), bytes.len() as u32)
+        };
+        unsafe { RegCloseKey(hkey) };
+        if status != 0 {
+            return Err(format!("写入自启项失败 (code {status})"));
+        }
+        Ok(())
+    }
+
+    /// 禁用：删除 HKCU Run 键里的值
+    pub fn disable() -> Result<(), String> {
+        let mut hkey: isize = 0;
+        let sub = wide(RUN_KEY);
+        let status = unsafe {
+            RegOpenKeyExW(HKEY_CURRENT_USER, sub.as_ptr(), 0, KEY_WRITE, &mut hkey)
+        };
+        if status != 0 {
+            // 键不存在视为已禁用
+            return Ok(());
+        }
+        let name = wide(super::APP_NAME);
+        let status = unsafe { RegDeleteValueW(hkey, name.as_ptr()) };
+        unsafe { RegCloseKey(hkey) };
+        if status != 0 && status != 2 {
+            // 2 = ERROR_FILE_NOT_FOUND，本来就没有
+            return Err(format!("删除自启项失败 (code {status})"));
+        }
+        Ok(())
+    }
+
+    /// 查询是否已启用
+    pub fn is_enabled() -> bool {
+        let mut hkey: isize = 0;
+        let sub = wide(RUN_KEY);
+        let status = unsafe {
+            RegOpenKeyExW(HKEY_CURRENT_USER, sub.as_ptr(), 0, KEY_READ, &mut hkey)
+        };
+        if status != 0 {
+            return false;
+        }
+        let name = wide(super::APP_NAME);
+        let mut buf = [0u8; 4];
+        let mut len = buf.len() as u32;
+        let mut value_type: u32 = 0;
+        let status = unsafe {
+            RegQueryValueExW(hkey, name.as_ptr(), std::ptr::null_mut(), &mut value_type, buf.as_mut_ptr(), &mut len)
+        };
+        unsafe { RegCloseKey(hkey) };
+        status == 0
+    }
+}
+
+// ====== 回退方案: LaunchAgent plist（仅 macOS） ======
+
+#[cfg(not(target_os = "windows"))]
 fn plist_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home)
@@ -90,6 +236,7 @@ fn plist_path() -> PathBuf {
 
 /// 尝试从当前可执行路径向上找到 .app bundle
 /// 路径模式: MaikNote.app/Contents/MacOS/maiknote
+#[cfg(not(target_os = "windows"))]
 fn find_app_bundle() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let mut path = exe.as_path();
@@ -103,6 +250,7 @@ fn find_app_bundle() -> Option<PathBuf> {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn enable_plist() -> Result<(), String> {
     let app_bundle = find_app_bundle()
         .ok_or_else(|| "未找到 .app bundle（可能在开发模式下运行）".to_string())?;
@@ -153,6 +301,7 @@ fn enable_plist() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 fn disable_plist() -> Result<(), String> {
     let path = plist_path();
     if path.exists() {
@@ -170,6 +319,7 @@ fn disable_plist() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(target_os = "windows"))]
 fn is_plist_enabled() -> bool {
     plist_path().exists()
 }
@@ -178,36 +328,58 @@ fn is_plist_enabled() -> bool {
 
 /// 启用开机自启
 ///
-/// macOS 13+ 使用 SMAppService（系统设置 > 登录项可见）
+/// Windows 写 HKCU Run 键；macOS 13+ 使用 SMAppService（系统设置 > 登录项可见），
 /// 旧版 macOS 使用 LaunchAgent plist 回退
 pub fn enable() -> Result<(), String> {
-    // 先清理可能遗留的 plist，避免双重启动
-    let _ = disable_plist();
-
-    if apple::is_available() {
-        // 检查是否已注册，避免重复注册导致状态异常
-        if apple::is_enrolled().unwrap_or(false) {
-            return Ok(());
-        }
-        return apple::enable();
+    #[cfg(target_os = "windows")]
+    {
+        // plist/SMAppService 逻辑在 Windows 上不参与，直接走注册表
+        return windows_reg::enable();
     }
-    enable_plist()
+    #[cfg(not(target_os = "windows"))]
+    {
+        // 先清理可能遗留的 plist，避免双重启动
+        let _ = disable_plist();
+
+        if apple::is_available() {
+            // 检查是否已注册，避免重复注册导致状态异常
+            if apple::is_enrolled().unwrap_or(false) {
+                return Ok(());
+            }
+            return apple::enable();
+        }
+        enable_plist()
+    }
 }
 
 /// 禁用开机自启
 pub fn disable() -> Result<(), String> {
-    if apple::is_available() {
-        let _ = apple::disable();
+    #[cfg(target_os = "windows")]
+    {
+        return windows_reg::disable();
     }
-    disable_plist()
+    #[cfg(not(target_os = "windows"))]
+    {
+        if apple::is_available() {
+            let _ = apple::disable();
+        }
+        disable_plist()
+    }
 }
 
 /// 检查开机自启是否已启用
 pub fn is_enabled() -> bool {
-    if apple::is_available() {
-        return apple::is_enrolled().unwrap_or(false);
+    #[cfg(target_os = "windows")]
+    {
+        return windows_reg::is_enabled();
     }
-    is_plist_enabled()
+    #[cfg(not(target_os = "windows"))]
+    {
+        if apple::is_available() {
+            return apple::is_enrolled().unwrap_or(false);
+        }
+        is_plist_enabled()
+    }
 }
 
 /// 检测当前进程是否由开机自启启动

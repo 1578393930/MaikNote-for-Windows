@@ -71,6 +71,7 @@ pub fn open_note_ids(app: &AppHandle) -> Vec<String> {
 /// kCGDesktopIconWindowLevel：桌面图标所在层级
 const DESKTOP_ICON_WINDOW_LEVEL: i64 = -2_147_483_603;
 
+#[cfg(target_os = "macos")]
 fn set_window_level(window: &tauri::WebviewWindow, level: i64) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -84,12 +85,14 @@ fn set_window_level(window: &tauri::WebviewWindow, level: i64) {
 }
 
 /// 浮在所有普通窗口之上（NSFloatingWindowLevel）
+#[cfg(target_os = "macos")]
 const FLOATING_WINDOW_LEVEL: i64 = 3;
 
 /// 三档层级各自对应的 AppKit window level：
 /// - `top`    浮在所有应用窗口之上
 /// - `normal` 普通图层（和其他窗口平等，会被别的应用盖住）
 /// - `desktop` 桌面层：桌面图标之上、所有应用窗口之下
+#[cfg(target_os = "macos")]
 fn level_value(level: &str) -> i64 {
     match level {
         "top" => FLOATING_WINDOW_LEVEL,
@@ -100,6 +103,7 @@ fn level_value(level: &str) -> i64 {
 
 /// 桌面层额外需要的窗口行为：所有 Space 都在、不随 Space 切换移动、不参与 Cmd+ 循环。
 /// 非桌面层要把这几位清掉，否则切回「普通图层」后卡片仍会跨 Space 常驻。
+#[cfg(target_os = "macos")]
 fn set_desktop_collection_behavior(window: &tauri::WebviewWindow, desktop: bool) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -131,6 +135,7 @@ fn set_desktop_collection_behavior(window: &tauri::WebviewWindow, desktop: bool)
 /// 随后排队的那条异步消息把层级打回 0 —— 于是「贴桌面」和「普通图层」肉眼没区别。
 /// 现在：非 top 档完全不碰 `set_always_on_top`；真正的层级在主线程写一次，
 /// 再排到主队列队尾补写一次（FIFO 保证排在 tao 那条异步消息之后）。
+#[cfg(target_os = "macos")]
 fn apply_level(app: &AppHandle, window: &tauri::WebviewWindow, level: &str) {
     let app_for_defer = app.clone();
     let window = window.clone();
@@ -153,7 +158,24 @@ fn apply_level(app: &AppHandle, window: &tauri::WebviewWindow, level: &str) {
     });
 }
 
+/// Windows 版层级：top=置顶；normal=普通层级；desktop=压到 Z 序最底（贴桌面的近似观感）。
+/// 统一派回主线程执行，避免多线程窗口操作。
+#[cfg(target_os = "windows")]
+fn apply_level(app: &AppHandle, window: &tauri::WebviewWindow, level: &str) {
+    let window = window.clone();
+    let level = level.to_string();
+    let _ = app.run_on_main_thread(move || {
+        let _ = window.set_always_on_top(level == "top");
+        if level == "desktop" {
+            if let Ok(hwnd) = window.hwnd() {
+                crate::win32::set_window_zorder(hwnd.0 as isize, crate::win32::HWND_BOTTOM);
+            }
+        }
+    });
+}
+
 /// 窗口刚 show 出来的头两秒里可能还有排队的异步 setLevel，多压几次兜底。
+#[cfg(target_os = "macos")]
 fn apply_level_settling(app: &AppHandle, window: &tauri::WebviewWindow, level: &str) {
     let app_handle = app.clone();
     let target = window.clone();
@@ -164,6 +186,12 @@ fn apply_level_settling(app: &AppHandle, window: &tauri::WebviewWindow, level: &
             apply_level(&app_handle, &target, &level);
         }
     });
+}
+
+/// Windows：set_always_on_top / SetWindowPos 都是同步生效的，压一次即可。
+#[cfg(target_os = "windows")]
+fn apply_level_settling(app: &AppHandle, window: &tauri::WebviewWindow, level: &str) {
+    apply_level(app, window, level);
 }
 
 /// 打开（或重新显示）某篇笔记的桌面卡片窗口

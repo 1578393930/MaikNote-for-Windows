@@ -23,7 +23,7 @@ import Highlight from '@tiptap/extension-highlight'
 import Underline from '@tiptap/extension-underline'
 import FontFamily from '@tiptap/extension-font-family'
 import Link from '@tiptap/extension-link'
-import { Fragment } from '@tiptap/pm/model'
+import { Fragment, DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import { defaultMarkdownSerializer } from 'prosemirror-markdown'
 import { CodeBlockCopyExtension } from './extensions/CodeBlockCopyExtension'
 import { searchLanguages, displayNameOf } from './extensions/CodeBlockLanguageExtension'
@@ -41,7 +41,10 @@ import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import { TextSelection, AllSelection } from 'prosemirror-state'
+import type { EditorView } from 'prosemirror-view'
 import { useFileSystem } from '@/composables/useFileSystem'
+import { normalizeLegacyAssetUrls } from '@/utils/assetUrl'
+import { looksLikeMarkdown } from '@/utils/looksLikeMarkdown'
 import { useI18n } from 'vue-i18n'
 import { SOURCE_TAB_INSERT_TEXT, createRichTabInsertText } from './tabInsert'
 import { EMPTY_LINE_MARK, EMPTY_LINE_CHAR, isEmptyLineMarkerText } from './emptyLine'
@@ -732,6 +735,18 @@ async function copySelection() {
 async function pasteClipboard() {
   const ed = editor.value
   if (!ed) return
+  // 先收起菜单再操作：菜单收起会改变焦点，写在后面容易被浏览器拒绝
+  hideContextMenu()
+  try {
+    // 右键菜单粘贴也支持图片（Ctrl+V 走 editorProps.handlePaste，这里走剪贴板 API）
+    const img = await readClipboardImageFile()
+    if (img) {
+      await saveAndInsertImage(ed.view, img)
+      return
+    }
+  } catch {
+    // 剪贴板 API 不可用/无权限：回落到文本粘贴
+  }
   try {
     const text = await readText()
     if (text) {
@@ -740,7 +755,88 @@ async function pasteClipboard() {
   } catch (err) {
     console.error('粘贴失败:', err)
   }
-  hideContextMenu()
+}
+
+// ==================== 图片粘贴 / 拖入（Windows WebView2 兼容） ====================
+/**
+ * 图片扩展名兜底匹配。
+ * Windows WebView2 下从资源管理器复制图片文件时，clipboardData.items 的 type 可能是空串
+ * （macOS WebKit 会给出 image/png），所以除了 MIME 还要按文件名扩展名识别。
+ */
+const IMAGE_FILE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i
+
+function isImageFile(f: File): boolean {
+  return f.type.startsWith('image/') || IMAGE_FILE_EXT_RE.test(f.name)
+}
+
+/** 从 Paste/Drop 事件的 DataTransfer 里取第一个图片文件；items 匹配不上时回退 files 扫描 */
+function pickImageFile(dt: DataTransfer): File | null {
+  for (let i = 0; i < dt.items.length; i++) {
+    const item = dt.items[i]
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+    const f = item.getAsFile()
+    if (f) return f
+  }
+  for (let j = 0; j < dt.files.length; j++) {
+    const f = dt.files[j]
+    if (isImageFile(f)) return f
+  }
+  return null
+}
+
+/** 图片扩展名：优先 MIME subtype（jpeg 规范成 jpg），空类型时从文件名取 */
+function imageExtOf(file: File): string {
+  const sub = file.type.split('/')[1]?.toLowerCase()
+  if (sub) return sub === 'jpeg' ? 'jpg' : sub
+  const m = IMAGE_FILE_EXT_RE.exec(file.name)
+  return (m?.[1] || 'png').toLowerCase()
+}
+
+/** 读取图片文件 → 存盘（images/）→ 插入编辑器 */
+async function saveAndInsertImage(view: EditorView, file: File) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const r = e.target?.result as string
+      if (r) resolve(r)
+      else reject(new Error('empty data url'))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('read image failed'))
+    reader.readAsDataURL(file)
+  })
+
+  try {
+    const timestamp = Date.now()
+    const randomStr = Math.random().toString(36).substring(2, 8)
+    const filename = `img_${timestamp}_${randomStr}.${imageExtOf(file)}`
+
+    // 保存到笔记空间的 images 文件夹，返回 asset:// URL
+    const src = await fileSystem.saveImage(dataUrl, filename)
+
+    const imageNode = view.state.schema.nodes.image.create({ src, alt: '', title: '' })
+    view.dispatch(view.state.tr.replaceSelectionWith(imageNode))
+  } catch (err) {
+    console.error('Failed to save image:', err)
+    showToast(t('toast.imageSaveFailed'))
+  }
+}
+
+/** 通过 async Clipboard API 读取系统剪贴板里的图片（右键菜单粘贴用）；无图/无权限返回 null */
+async function readClipboardImageFile(): Promise<File | null> {
+  try {
+    const clip = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItem[]> }
+    if (!clip?.read) return null
+    const items = await clip.read()
+    for (const item of items) {
+      const type = item.types.find((tp) => tp.startsWith('image/'))
+      if (!type) continue
+      const blob = await item.getType(type)
+      return new File([blob], `clipboard.${type.split('/')[1] || 'png'}`, { type })
+    }
+  } catch {
+    // NotAllowedError / 无图片 / WebView 不支持：静默回落到文本粘贴
+  }
+  return null
 }
 
 // 点击编辑器容器时确保光标正确放置
@@ -2258,7 +2354,7 @@ const editor = useEditor({
     TableCell,
     TableHeader,
   ],
-  content: props.initialContent,
+  content: normalizeLegacyAssetUrls(props.initialContent),
   editorProps: {
     handleDOMEvents: {
       // Cmd/Ctrl + 单击链接 → 用系统默认浏览器打开（普通单击仍然是放光标）
@@ -2538,61 +2634,45 @@ const editor = useEditor({
       const clipboardData = event.clipboardData
       if (!clipboardData) return false
 
-      // 检查是否有图片
-      const items = clipboardData.items
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i]
-        if (item.type.startsWith('image/')) {
-          event.preventDefault()
-
-          // 从剪贴板获取文件
-          let file = item.getAsFile()
-          // 如果 getAsFile 返回 null，尝试从 files 获取
-          if (!file && clipboardData.files.length > 0) {
-            for (let j = 0; j < clipboardData.files.length; j++) {
-              const f = clipboardData.files[j]
-              if (f.type.startsWith('image/')) {
-                file = f
-                break
-              }
-            }
-          }
-          if (!file) {
-            return true
-          }
-
-          const reader = new FileReader()
-          reader.onload = async (e) => {
-            const dataUrl = e.target?.result as string
-            if (!dataUrl) return
-
-            try {
-              // 生成唯一文件名
-              const timestamp = Date.now()
-              const randomStr = Math.random().toString(36).substring(2, 8)
-              const ext = item.type.split('/')[1] || 'png'
-              const filename = `img_${timestamp}_${randomStr}.${ext}`
-
-              // 保存图片到 iCloud 的 images 文件夹
-              const relativePath = await fileSystem.saveImage(dataUrl, filename)
-
-              // 插入图片到编辑器（relativePath 已经是 asset:// URL）
-              const imageNode = view.state.schema.nodes.image.create({ src: relativePath, alt: '', title: '' })
-              view.dispatch(view.state.tr.replaceSelectionWith(imageNode))
-            } catch (err) {
-              console.error('Failed to save image:', err)
-              showToast(t('toast.imageSaveFailed'))
-            }
-          }
-          reader.readAsDataURL(file)
-          return true
-        }
+      // 图片粘贴：截图 / 网页图片 / 从资源管理器复制的图片文件。
+      // Windows WebView2 下复制图片文件时 items 的 type 可能为空，pickImageFile 内部会回退 files 扫描
+      const imgFile = pickImageFile(clipboardData)
+      if (imgFile) {
+        event.preventDefault()
+        void saveAndInsertImage(view, imgFile)
+        return true
       }
 
       // 非图片内容，尝试处理 Markdown 链接语法
       const text = clipboardData.getData('text/plain')
-      if (text && /\[([^\]]+)\]\(([^)]+)\)/.test(text)) {
-        event.preventDefault()
+      const clipboardHtml = clipboardData.getData('text/html')
+
+      // 剪贴板只有纯文本（没有 HTML 副本，例如从侧边栏「复制」按钮 / 记事本复制）
+      // 且内容像 Markdown 时，按 Markdown 解析插入，避免源码被当普通文字整段贴进来。
+      // 用 tiptap-markdown 自己的解析器产出 HTML，再走 ProseMirror DOMParser 插入 Slice
+      // （与它内置的 clipboardTextParser 同一条路径，保证兼容）。
+      // 带 HTML 副本的富文本粘贴（网页、Office）走默认 DOM 解析，不受影响。
+      if (text && !clipboardHtml && looksLikeMarkdown(text)) {
+        const markdownStorage = (editor.value?.storage as any)?.markdown
+        const html = markdownStorage?.parser?.parse?.(text)
+        if (html) {
+          try {
+            const container = document.createElement('div')
+            container.innerHTML = html
+            const slice = ProseMirrorDOMParser.fromSchema(editor.value!.schema).parseSlice(container, {
+              preserveWhitespace: false,
+            })
+            event.preventDefault()
+            view.dispatch(view.state.tr.replaceSelection(slice))
+            return true
+          } catch (e) {
+            // 解析/插入失败不拦截粘贴：退回默认行为（纯文本），至少保证有内容
+            console.error('Markdown 粘贴解析失败，回退默认粘贴:', e)
+          }
+        }
+      }
+
+      if (text && /\[([^\]]+)\]\(([^)]+)\)/.test(text)) {        event.preventDefault()
         const html = text.replace(
           /\[([^\]]+)\]\(([^)]+)\)/g,
           '<a href="$2">$1</a>'
@@ -2616,19 +2696,10 @@ const editor = useEditor({
       const dataTransfer = event.dataTransfer
       if (!dataTransfer) return false
 
-      // 检查是否有文件
-      const files = dataTransfer.files
-
+      // 检查是否是图片文件（MIME + 扩展名双路识别，Windows 下拖入文件的 type 可能为空）
+      const files = Array.from(dataTransfer.files)
       if (files.length === 0) return false
-
-      // 检查是否是图片文件
-      const imageFiles: File[] = []
-      for (let i = 0; i < files.length; i++) {
-        if (files[i].type.startsWith('image/')) {
-          imageFiles.push(files[i])
-        }
-      }
-
+      const imageFiles = files.filter(isImageFile)
       if (imageFiles.length === 0) return false
 
       event.preventDefault()
@@ -2643,32 +2714,9 @@ const editor = useEditor({
       const selection = TextSelection.near($pos)
       view.dispatch(view.state.tr.setSelection(selection))
 
-      // 异步处理每个图片
+      // 逐张保存并插入
       for (const file of imageFiles) {
-        const reader = new FileReader()
-        reader.onload = async (e) => {
-          const dataUrl = e.target?.result as string
-          if (!dataUrl) return
-
-          try {
-            // 生成唯一文件名
-            const timestamp = Date.now()
-            const randomStr = Math.random().toString(36).substring(2, 8)
-            const ext = file.type.split('/')[1] || 'png'
-            const filename = `img_${timestamp}_${randomStr}.${ext}`
-
-            // 保存图片到 iCloud 的 images 文件夹
-            const relativePath = await fileSystem.saveImage(dataUrl, filename)
-
-            // 插入图片到编辑器（relativePath 已经是完整的 file:// URL）
-            const imageNode = view.state.schema.nodes.image.create({ src: relativePath, alt: '', title: '' })
-            view.dispatch(view.state.tr.replaceSelectionWith(imageNode))
-          } catch (err) {
-            console.error('Failed to save image:', err)
-            showToast(t('toast.imageSaveFailed'))
-          }
-        }
-        reader.readAsDataURL(file)
+        void saveAndInsertImage(view, file)
       }
 
       return true
@@ -2752,7 +2800,8 @@ watch(() => props.initialContent, (newContent) => {
   if (editor.value && !isImeEditing() && newContent !== lastEmittedMarkdown) {
     const current = getNormalizedMarkdown()
     if (newContent !== current) {
-      editor.value.commands.setContent(newContent)
+      // Windows 上把旧内容的 asset:// 归一化为 http://asset.localhost/，否则图片裂图
+      editor.value.commands.setContent(normalizeLegacyAssetUrls(newContent))
     }
   }
 })

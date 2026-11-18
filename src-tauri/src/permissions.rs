@@ -10,6 +10,7 @@
 //! 前端跳转后轮询状态，用户勾完回来会自动变成「已授权」。
 
 use serde::Serialize;
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 use tauri::AppHandle;
 
@@ -28,6 +29,7 @@ pub struct FullDiskAccessStatus {
     pub bundled: bool,
 }
 
+#[cfg(target_os = "macos")]
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -35,6 +37,7 @@ fn home_dir() -> PathBuf {
 }
 
 /// 受 TCC 保护、未授权时读会 EPERM 的路径，按顺序找第一个存在的
+#[cfg(target_os = "macos")]
 fn probes() -> Vec<PathBuf> {
     let home = home_dir();
     vec![
@@ -47,6 +50,7 @@ fn probes() -> Vec<PathBuf> {
 }
 
 /// 逐个探测：能读到 = 有权限；EPERM = 没权限；不存在 = 换下一个
+#[cfg(target_os = "macos")]
 fn detect() -> (bool, bool, PathBuf) {
     let mut last = PathBuf::new();
     for path in probes() {
@@ -65,6 +69,7 @@ fn detect() -> (bool, bool, PathBuf) {
 }
 
 /// 从可执行文件往上找 `*.app`，找不到就把可执行文件所在目录当结果
+#[cfg(target_os = "macos")]
 fn app_bundle_path() -> (PathBuf, bool) {
     let exe = std::env::current_exe().unwrap_or_default();
     for ancestor in exe.ancestors() {
@@ -78,14 +83,29 @@ fn app_bundle_path() -> (PathBuf, bool) {
 
 #[tauri::command]
 pub fn full_disk_access_status(_app: AppHandle) -> FullDiskAccessStatus {
-    let (granted, detectable, probe) = detect();
-    let (app_path, bundled) = app_bundle_path();
-    FullDiskAccessStatus {
-        granted,
-        detectable,
-        probe: probe.display().to_string(),
-        app_path: app_path.display().to_string(),
-        bundled,
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 没有 TCC / 完全磁盘访问机制，直接报「无需授权」
+        let exe = std::env::current_exe().unwrap_or_default();
+        return FullDiskAccessStatus {
+            granted: true,
+            detectable: false,
+            probe: String::new(),
+            app_path: exe.display().to_string(),
+            bundled: false,
+        };
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let (granted, detectable, probe) = detect();
+        let (app_path, bundled) = app_bundle_path();
+        FullDiskAccessStatus {
+            granted,
+            detectable,
+            probe: probe.display().to_string(),
+            app_path: app_path.display().to_string(),
+            bundled,
+        }
     }
 }
 
@@ -100,13 +120,18 @@ pub fn open_full_disk_access_settings() -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| format!("打开系统设置失败: {e}"))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 无需此授权
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Err("仅 macOS 支持".to_string())
     }
 }
 
-/// 在 Finder 里显示 app 本身，方便直接拖进完全磁盘访问列表
+/// 在 Finder / 资源管理器里显示 app 本身，方便直接拖进完全磁盘访问列表
 #[tauri::command]
 pub fn reveal_app_in_finder() -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -121,7 +146,16 @@ pub fn reveal_app_in_finder() -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| format!("打开 Finder 失败: {e}"))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let exe = std::env::current_exe().map_err(|e| format!("获取可执行路径失败: {e}"))?;
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", exe.display()))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开资源管理器失败: {e}"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Err("仅 macOS 支持".to_string())
     }
@@ -133,7 +167,7 @@ pub fn restart_app(app: AppHandle) {
     app.restart();
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

@@ -1,12 +1,14 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import UnoCSS from "unocss/vite";
+import { fileURLToPath } from "node:url";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 
-const srcPath = new URL("./src", import.meta.url).pathname;
+// Windows 下 URL.pathname 会产出 /D:/... 形式的非法路径，必须用 fileURLToPath 转换
+const srcPath = fileURLToPath(new URL("./src", import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({

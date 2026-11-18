@@ -6,8 +6,9 @@
  * 才写 shortcutTutorialSeen 并退场。App.vue 通过 marknote:main-toggled 事件和
  * 窗口焦点变化推进 phase。
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useSettingStore } from '@/stores/settingStore'
 
 /** start = 还没按过；hidden = 已经按着收起过一次，等用户再按回来 */
 const props = defineProps<{ phase: 'start' | 'hidden' }>()
@@ -15,6 +16,10 @@ const props = defineProps<{ phase: 'start' | 'hidden' }>()
 const emit = defineEmits<{ (e: 'skip'): void }>()
 
 const { t } = useI18n()
+const settingStore = useSettingStore()
+
+/** 渲染用户实际配置的「唤起主窗口」快捷键，不再硬编码 ⌥⌘A */
+const keyCaps = computed(() => settingStore.settings.shortcuts.showMain.split('+'))
 
 // 按了没反应通常是快捷键被别的应用抢了，给一条出路，但先让用户认真试十秒
 const showTrouble = ref(false)
@@ -43,7 +48,7 @@ onBeforeUnmount(() => {
         <p class="coach-sub">{{ t('coach.sub') }}</p>
       </div>
       <div class="coach-keys" aria-hidden="true">
-        <kbd>⌥</kbd><kbd>⌘</kbd><kbd>A</kbd>
+        <kbd v-for="k in keyCaps" :key="k">{{ k }}</kbd>
       </div>
     </div>
 

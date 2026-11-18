@@ -8,6 +8,7 @@ import { editorStylePresets } from '@/composables/editorStylePresets'
 import { useAssistantsStore, defaultAssistants, type Assistant } from '@/stores/assistantsStore'
 import { useVersionCheck } from '@/composables/useVersionCheck'
 import { useDesktopNotes } from '@/composables/useDesktopNotes'
+import { useWebDavSync } from '@/composables/useWebDavSync'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import AssistantEditor from '@/components/Assistant/AssistantEditor.vue'
 import PrivacyPledge from '@/components/common/PrivacyPledge.vue'
@@ -16,6 +17,7 @@ import { useI18n } from 'vue-i18n'
 import NoteLogo from '@/components/NoteLogo.vue'
 import { presetsOfStyle, type NoteLogoStyle } from '@/utils/noteLogoPresets'
 import { syncAppIcon, appIconReport, appIconError } from '@/composables/useAppIcon'
+import { isMac, isWindows, altKeyName } from '@/utils/platform'
 import { useTheme } from '@/composables/useTheme'
 import { noteColorOptionsFor } from '@/utils/noteColors'
 
@@ -96,9 +98,8 @@ function showToast(message: string, duration = 2000) {
   setTimeout(() => toast.remove(), duration)
 }
 
-const { currentVersion, latestVersion, downloadState, downloadProgress, updateAvailable, checkError, checkForUpdates, downloadAndInstall } = useVersionCheck()
-const checkLoading = computed(() => downloadState.value === 'checking')
-const tagsUrl = 'https://github.com/Aprilming/maiknote/tags'
+// Windows 版暂不启用在线更新，仅显示安装包的当前版本。
+const { currentVersion } = useVersionCheck()
 // IP 助手：查询地址在通用设置里可改（空值/非法值回落到 DEFAULT_IP_API_URL），项目地址是自建部署镜像
 const ipProjectUrl = 'https://hub.docker.com/r/aprilming/ipip'
 
@@ -112,6 +113,31 @@ const ipApiUrlEffective = computed(() => normalizeIpApiUrl(settingStore.settings
 const { currentTheme, isDark } = useTheme()
 const assistantsStore = useAssistantsStore()
 const { t, locale } = useI18n()
+
+// WebDAV 同步（composable 返回模块级单例，与 App 共享状态；解构后模板里可直接自动解包）
+const {
+  syncing: webDavSyncing,
+  lastSummary: webDavLastSummary,
+  lastError: webDavLastError,
+  syncNow: webDavSyncNow,
+  testConnection: webDavTestConn,
+} = useWebDavSync()
+const webDavTestOk = ref(false)
+const webDavTestMessage = ref('')
+async function webDavTest() {
+  webDavTestMessage.value = t('settings.webdavTesting')
+  const result = await webDavTestConn()
+  webDavTestOk.value = result.ok
+  webDavTestMessage.value = result.message
+}
+/** 自动同步间隔选项（分钟） */
+const webDavIntervalOptions = computed(() => [
+  { value: 0, label: t('settings.webdavIntervalOff') },
+  { value: 5, label: '5' },
+  { value: 15, label: '15' },
+  { value: 30, label: '30' },
+  { value: 60, label: '60' },
+])
 
 // 模板助手卡片图标（顺序与 defaultAssistants 对齐）
 const templateIcons = ['i-mdi-auto-fix', 'i-mdi-playlist-check', 'i-mdi-creation']
@@ -474,9 +500,11 @@ function handleKeydown(e: KeyboardEvent) {
 
   const parts: string[] = []
   if (e.ctrlKey) parts.push('Ctrl')
-  if (e.altKey) parts.push('Option')
+  // Windows 记录 Alt（macOS 惯用 Option 显示名）
+  if (e.altKey) parts.push(altKeyName)
   if (e.shiftKey) parts.push('Shift')
-  if (e.metaKey) parts.push('Cmd')
+  // Win 键被系统保留，Windows 上不录制 Cmd(Meta) 组合
+  if (e.metaKey && isMac) parts.push('Cmd')
 
   if (parts.length === 0) return
   if (parts.length > 4) return
@@ -832,6 +860,12 @@ const skillLoadError = ref('')
 
 function prettyPath(path: string): string {
   if (!path) return '—'
+  if (isWindows) {
+    // C:\Users\<name>\... → ~\...
+    return path
+      .replace(/^([A-Za-z]:\\Users\\[^\\/]+)/, '~')
+      .replace(/^C:\/Users\/[^/]+/, '~')
+  }
   return path.replace(/^\/Users\/[^/]+/, '~')
 }
 
@@ -1112,6 +1146,157 @@ async function handleSkillUnlink(target: SkillTargetInfo) {
                 >
                   <i class="i-mdi-eye-outline"></i>
                   <span>{{ $t('settings.titleBarAlwaysShow') }}</span>
+                </button>
+              </div>
+            </div>
+          </section>
+          <div class="settings-group-title">{{ $t('settings.groupSync') }}</div>
+          <section class="settings-section">
+            <div class="setting-item setting-item-inline">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavEnabled') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavEnabledDesc') }}</span>
+              </div>
+              <button
+                class="toggle-btn"
+                :class="{ active: settingStore.settings.webdavEnabled }"
+                @click="settingStore.updateSettings('webdavEnabled', !settingStore.settings.webdavEnabled)"
+              >
+                <span class="toggle-slider"></span>
+              </button>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavUrl') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavUrlDesc') }}</span>
+              </div>
+              <input
+                type="text"
+                class="text-input"
+                :value="settingStore.settings.webdavUrl"
+                placeholder="https://dav.jianguoyun.com/dav/"
+                spellcheck="false"
+                @change="settingStore.updateSettings('webdavUrl', ($event.target as HTMLInputElement).value)"
+                @keydown.enter="($event.target as HTMLInputElement).blur()"
+              />
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavUsername') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavUsernameDesc') }}</span>
+              </div>
+              <input
+                type="text"
+                class="text-input"
+                :value="settingStore.settings.webdavUsername"
+                spellcheck="false"
+                autocomplete="off"
+                @change="settingStore.updateSettings('webdavUsername', ($event.target as HTMLInputElement).value)"
+                @keydown.enter="($event.target as HTMLInputElement).blur()"
+              />
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavPassword') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavPasswordDesc') }}</span>
+              </div>
+              <input
+                type="password"
+                class="text-input"
+                :value="settingStore.settings.webdavPassword"
+                autocomplete="new-password"
+                @change="settingStore.updateSettings('webdavPassword', ($event.target as HTMLInputElement).value)"
+                @keydown.enter="($event.target as HTMLInputElement).blur()"
+              />
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavRemoteDir') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavRemoteDirDesc') }}</span>
+              </div>
+              <input
+                type="text"
+                class="text-input"
+                :value="settingStore.settings.webdavRemoteDir"
+                spellcheck="false"
+                @change="settingStore.updateSettings('webdavRemoteDir', ($event.target as HTMLInputElement).value)"
+                @keydown.enter="($event.target as HTMLInputElement).blur()"
+              />
+            </div>
+
+            <div class="setting-item setting-item-inline">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavAllowInsecure') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavAllowInsecureDesc') }}</span>
+              </div>
+              <button
+                class="toggle-btn"
+                :class="{ active: settingStore.settings.webdavAllowInsecure }"
+                @click="settingStore.updateSettings('webdavAllowInsecure', !settingStore.settings.webdavAllowInsecure)"
+              >
+                <span class="toggle-slider"></span>
+              </button>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavActions') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavHint') }}</span>
+              </div>
+              <div class="theme-selector">
+                <button class="theme-btn" type="button" :disabled="webDavSyncing" @click="webDavTest">
+                  <i class="i-mdi-connection"></i>
+                  <span>{{ $t('settings.webdavTest') }}</span>
+                </button>
+                <button class="theme-btn" type="button" :disabled="webDavSyncing" @click="webDavSyncNow()">
+                  <i class="i-mdi-sync"></i>
+                  <span>{{ webDavSyncing ? $t('settings.webdavSyncing') : $t('settings.webdavSyncNow') }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div v-if="webDavTestMessage" class="setting-item">
+              <span class="setting-desc" :class="webDavTestOk ? 'webdav-msg-ok' : 'webdav-msg-err'">{{ webDavTestMessage }}</span>
+            </div>
+            <div v-if="webDavLastError" class="setting-item">
+              <span class="setting-desc webdav-msg-err">{{ webDavLastError }}</span>
+            </div>
+            <div v-else-if="webDavLastSummary" class="setting-item">
+              <span class="setting-desc">{{ webDavLastSummary }}</span>
+            </div>
+
+            <div class="setting-item setting-item-inline">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavOnStart') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavOnStartDesc') }}</span>
+              </div>
+              <button
+                class="toggle-btn"
+                :class="{ active: settingStore.settings.webdavSyncOnStart }"
+                @click="settingStore.updateSettings('webdavSyncOnStart', !settingStore.settings.webdavSyncOnStart)"
+              >
+                <span class="toggle-slider"></span>
+              </button>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-label">
+                <span class="setting-name">{{ $t('settings.webdavAutoInterval') }}</span>
+                <span class="setting-desc">{{ $t('settings.webdavAutoIntervalDesc') }}</span>
+              </div>
+              <div class="theme-selector">
+                <button
+                  v-for="opt in webDavIntervalOptions"
+                  :key="opt.value"
+                  class="theme-btn"
+                  :class="{ active: settingStore.settings.webdavAutoIntervalMin === opt.value }"
+                  @click="settingStore.updateSettings('webdavAutoIntervalMin', opt.value)"
+                >
+                  <span>{{ opt.label }}</span>
                 </button>
               </div>
             </div>
@@ -1625,7 +1810,7 @@ async function handleSkillUnlink(target: SkillTargetInfo) {
             </div>
           </div>
 
-          <div class="setting-item">
+          <div v-if="isMac" class="setting-item">
             <div class="setting-label">
               <span class="setting-name">{{ $t('settings.fdaTitle') }}</span>
               <span class="setting-desc">{{ $t('settings.fdaDesc') }}</span>
@@ -2013,43 +2198,6 @@ async function handleSkillUnlink(target: SkillTargetInfo) {
               <span class="version-label">{{ $t('settings.currentVersion') }}</span>
               <span class="version-number">v{{ currentVersion }}</span>
             </div>
-            <button
-              class="check-update-btn"
-              :disabled="checkLoading"
-              @click="checkForUpdates"
-            >
-              <i v-if="checkLoading" class="i-mdi-loading spin"></i>
-              <span v-else>{{ $t('settings.checkUpdate') }}</span>
-            </button>
-          </div>
-
-          <div v-if="updateAvailable" class="setting-item update-available">
-            <div class="update-info">
-              <i v-if="downloadState === 'downloading'" class="i-mdi-loading spin"></i>
-              <i v-else class="i-mdi-update"></i>
-              <span v-if="downloadState === 'downloading'">{{ $t('settings.downloading', { progress: downloadProgress }) }}</span>
-              <span v-else>{{ $t('settings.updateAvailable', { version: latestVersion }) }}</span>
-            </div>
-            <button class="download-btn" :disabled="downloadState === 'downloading'" @click="downloadAndInstall">
-              <i v-if="downloadState === 'downloading'" class="i-mdi-loading spin"></i>
-              <i v-else class="i-mdi-download"></i>
-              <span v-if="downloadState === 'downloading'">{{ downloadProgress }}%</span>
-              <span v-else>{{ $t('settings.installUpdate') }}</span>
-            </button>
-          </div>
-
-          <div v-else-if="checkError" class="setting-item update-error">
-            <div class="update-info">
-              <i class="i-mdi-alert-circle-outline"></i>
-              <span>{{ checkError }}</span>
-            </div>
-          </div>
-
-          <div v-else-if="latestVersion && !checkLoading" class="setting-item update-latest">
-            <div class="update-info">
-              <i class="i-mdi-check-circle-outline"></i>
-              <span>{{ $t('settings.upToDate', { version: latestVersion }) }}</span>
-            </div>
           </div>
 
           <div class="setting-item links-item">
@@ -2057,11 +2205,6 @@ async function handleSkillUnlink(target: SkillTargetInfo) {
               <i class="i-mdi-book-open-variant"></i>
               <span>{{ $t('settings.userGuide') }}</span>
               <i class="i-mdi-chevron-right link-icon"></i>
-            </a>
-            <a :href="tagsUrl" target="_blank" class="link-item">
-              <i class="i-mdi-tag-outline"></i>
-              <span>{{ $t('settings.versionTags') }}</span>
-              <i class="i-mdi-open-in-new link-icon"></i>
             </a>
           </div>
 
@@ -3029,6 +3172,21 @@ async function handleSkillUnlink(target: SkillTargetInfo) {
 
 .text-input::placeholder {
   color: var(--st-text-soft);
+}
+
+/* WebDAV 同步：测试/同步结果文案 */
+.webdav-msg-ok {
+  color: #2ea45d;
+}
+
+.webdav-msg-err {
+  color: #e5484d;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+:global(html[data-theme='dark']) .webdav-msg-ok {
+  color: #4ade80;
 }
 
 .link-btn {

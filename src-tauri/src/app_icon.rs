@@ -8,9 +8,15 @@
 //! 故意不动代码签名：重新签名会改掉 cdhash，全盘访问之类的系统授权会被清掉；只换资源文件的话
 //! 应用照常启动（已实测），授权也保留。原图标备份成 icon.icns.mn-original，换回去只需复原它。
 
+#[cfg(not(target_os = "windows"))]
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::path::Path;
+#[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
 use tauri::Manager;
 
 /// 允许的 Logo 预设 id，与前端 src/utils/noteLogoPresets.ts 一一对应。
@@ -19,6 +25,7 @@ pub const LOGO_VARIANTS: [&str; 11] = [
     "n9pink", "n9white",
 ];
 
+#[cfg(target_os = "macos")]
 const BUNDLE_BACKUP_NAME: &str = "icon.icns.mn-original";
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -40,6 +47,7 @@ fn is_known_variant(variant: &str) -> bool {
 }
 
 /// 候选 icns 路径：打包后的资源目录 → 包内 Resources → 开发期源码目录。
+#[cfg(target_os = "macos")]
 fn icns_candidates(app: &tauri::AppHandle, variant: &str) -> Vec<PathBuf> {
     let file = format!("{}.icns", variant);
     let mut out: Vec<PathBuf> = Vec::new();
@@ -64,6 +72,7 @@ fn icns_candidates(app: &tauri::AppHandle, variant: &str) -> Vec<PathBuf> {
     out
 }
 
+#[cfg(target_os = "macos")]
 fn resolve_icns(app: &tauri::AppHandle, variant: &str) -> Result<PathBuf, String> {
     for candidate in icns_candidates(app, variant) {
         if candidate.is_file() {
@@ -74,6 +83,7 @@ fn resolve_icns(app: &tauri::AppHandle, variant: &str) -> Result<PathBuf, String
 }
 
 /// 从可执行文件往上找 .app 包根目录（开发模式下的 target/debug 没有包）。
+#[cfg(target_os = "macos")]
 fn find_bundle_root(exe: &Path) -> Option<PathBuf> {
     exe.ancestors()
         .find(|p| p.extension().map(|e| e == "app").unwrap_or(false))
@@ -111,12 +121,13 @@ fn set_runtime_icon(app: &tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String
         .map_err(|e| e.to_string())?
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 fn set_runtime_icon(_app: &tauri::AppHandle, _bytes: Vec<u8>) -> Result<(), String> {
     Err("仅支持 macOS".to_string())
 }
 
 /// 让访达 / 启动台丢掉旧的图标缓存。
+#[cfg(target_os = "macos")]
 fn refresh_launch_services(bundle: &Path) {
     let _ = Command::new("touch").arg(bundle).status();
     let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
@@ -124,6 +135,7 @@ fn refresh_launch_services(bundle: &Path) {
 }
 
 /// 把 icns 写进 .app 包。返回是否真的替换了。
+#[cfg(target_os = "macos")]
 fn patch_bundle(bundle: &Path, bytes: &[u8]) -> Result<bool, String> {
     let resources = bundle.join("Contents/Resources");
     let target = resources.join("icon.icns");
@@ -159,50 +171,66 @@ pub fn apply_app_icon(app: tauri::AppHandle, variant: String) -> Result<AppIconR
         return Err(format!("未知的 Logo 预设：{}", variant));
     }
 
-    let path = resolve_icns(&app, &variant)?;
-    let bytes = fs::read(&path).map_err(|e| format!("读取图标失败：{}", e))?;
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 上 exe 图标来自资源文件，运行期无法更换；应用内 Logo 仍会切换
+        let _ = &app;
+        return Ok(AppIconReport {
+            variant,
+            runtime: false,
+            bundle: None,
+            bundle_updated: false,
+            message: "Windows 版不支持更换系统应用图标，应用内 Logo 已切换".to_string(),
+        });
+    }
 
-    let runtime_error = set_runtime_icon(&app, bytes.clone()).err();
+    #[cfg(not(target_os = "windows"))]
+    {
+        let path = resolve_icns(&app, &variant)?;
+        let bytes = fs::read(&path).map_err(|e| format!("读取图标失败：{}", e))?;
 
-    let mut bundle_path: Option<PathBuf> = None;
-    let mut bundle_updated = false;
-    let mut bundle_error: Option<String> = None;
+        let runtime_error = set_runtime_icon(&app, bytes.clone()).err();
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bundle) = find_bundle_root(&exe) {
-            match patch_bundle(&bundle, &bytes) {
-                Ok(changed) => {
-                    bundle_updated = changed;
-                    bundle_path = Some(bundle);
-                }
-                Err(err) => {
-                    bundle_path = Some(bundle);
-                    bundle_error = Some(err);
+        let mut bundle_path: Option<PathBuf> = None;
+        let mut bundle_updated = false;
+        let mut bundle_error: Option<String> = None;
+
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(bundle) = find_bundle_root(&exe) {
+                match patch_bundle(&bundle, &bytes) {
+                    Ok(changed) => {
+                        bundle_updated = changed;
+                        bundle_path = Some(bundle);
+                    }
+                    Err(err) => {
+                        bundle_path = Some(bundle);
+                        bundle_error = Some(err);
+                    }
                 }
             }
         }
+
+        let message = match (&bundle_path, bundle_updated, &bundle_error) {
+            (_, _, Some(err)) => err.clone(),
+            (Some(_), true, None) => "已写入 App 包，访达 / 启动台里的图标就是这个配色".to_string(),
+            (Some(_), false, None) => "App 图标已经是这个配色".to_string(),
+            (None, _, None) => match runtime_error {
+                None => "开发模式下只切换了运行期图标；打包安装后会直接写进 App 包".to_string(),
+                Some(ref err) => format!("切换运行期图标失败：{}", err),
+            },
+        };
+
+        Ok(AppIconReport {
+            variant,
+            runtime: runtime_error.is_none(),
+            bundle: bundle_path.map(|p| p.to_string_lossy().to_string()),
+            bundle_updated,
+            message,
+        })
     }
-
-    let message = match (&bundle_path, bundle_updated, &bundle_error) {
-        (_, _, Some(err)) => err.clone(),
-        (Some(_), true, None) => "已写入 App 包，访达 / 启动台里的图标就是这个配色".to_string(),
-        (Some(_), false, None) => "App 图标已经是这个配色".to_string(),
-        (None, _, None) => match runtime_error {
-            None => "开发模式下只切换了运行期图标；打包安装后会直接写进 App 包".to_string(),
-            Some(ref err) => format!("切换运行期图标失败：{}", err),
-        },
-    };
-
-    Ok(AppIconReport {
-        variant,
-        runtime: runtime_error.is_none(),
-        bundle: bundle_path.map(|p| p.to_string_lossy().to_string()),
-        bundle_updated,
-        message,
-    })
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

@@ -46,7 +46,10 @@ fn meta_root(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn expand_home(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok();
+        if let Some(home) = home {
             return PathBuf::from(home).join(rest);
         }
     }
@@ -277,7 +280,10 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("maiknote_ws_{}_{}", name, std::process::id()));
+        // 用项目内目录：部分受限环境（沙箱 / 企业策略）禁止写系统 %TEMP%，项目 target 一定可写
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/workspace-test")
+            .join(format!("{}_{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -339,7 +345,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_icloud_and_accepts_normal_folder() {
-        let icloud = std::env::temp_dir().join("com~apple~CloudDocs_probe");
+        // 同样用项目内目录，规避受限环境禁写系统 %TEMP% 的问题
+        let icloud = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/workspace-test")
+            .join(format!("com~apple~CloudDocs_probe_{}", std::process::id()));
         let _ = fs::remove_dir_all(&icloud);
         fs::create_dir_all(&icloud).unwrap();
         let err = validate_workspace_dir(s(&icloud)).unwrap_err();

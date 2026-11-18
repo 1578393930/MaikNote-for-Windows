@@ -15,7 +15,7 @@ import { adaptNoteColor } from '@/utils/noteColorTheme'
 import { useEditorStyle } from '@/composables/useEditorStyle'
 import { useEdgePanel, isMainAutoHideSuppressed } from '@/composables/useEdgePanel'
 import { useDesktopNotes } from '@/composables/useDesktopNotes'
-import { useVersionCheck } from '@/composables/useVersionCheck'
+import { useWebDavSync } from '@/composables/useWebDavSync'
 import { syncAppIcon } from '@/composables/useAppIcon'
 import { useI18n } from 'vue-i18n'
 import { isNativeDialogCurrentlyOpen } from '@/stores/dialogStore'
@@ -39,6 +39,7 @@ useGlobalShortcut()
 const { currentTheme } = useTheme() // 初始化主题系统，currentTheme 供笔记底色做明暗适配
 useEditorStyle() // 初始化编辑器样式预设
 useEdgePanel() // 把收藏笔记同步到屏幕边缘面板
+const webDavSync = useWebDavSync() // WebDAV 同步调度
 const { locale } = useI18n()
 
 // 同步语言设置到 vue-i18n，顺带同步菜单栏图标的菜单文案
@@ -56,7 +57,6 @@ watch(() => settingStore.settings.trayIconEnabled, (enabled) => {
   })
 }, { immediate: true })
 
-const { latestVersion, updateAvailable, checkForUpdates, downloadAndInstall, downloadState, downloadProgress } = useVersionCheck()
 
 // 当前页面：'editor' | 'settings' | 'search'
 const currentView = ref<'editor' | 'settings' | 'search'>('editor')
@@ -185,20 +185,6 @@ onUnmounted(() => {
 // 初始化完成标志，防止开机自启时iCloud未准备好导致空白
 const isAppReady = ref(false)
 
-// 更新提示 toast，8秒后自动消失
-const showUpdateToast = ref(false)
-let updateToastTimer: ReturnType<typeof setTimeout> | null = null
-
-watch(updateAvailable, (val) => {
-  if (val) {
-    showUpdateToast.value = true
-    if (updateToastTimer) clearTimeout(updateToastTimer)
-    updateToastTimer = setTimeout(() => {
-      showUpdateToast.value = false
-    }, 8000)
-  }
-})
-
 // 监听透明度变化，同步 surface 背景色
 watch(() => settingStore.settings.windowAlpha, updateSurfaceColor, { immediate: true })
 
@@ -310,6 +296,9 @@ onMounted(async () => {
   // 按设置把钉在桌面上的笔记卡片还原出来（要笔记数据在手才行）
   void desktopNotes.start()
 
+  // WebDAV 自动同步（启动同步 + 定时器），按设置决定是否生效
+  webDavSync.startAutoSync()
+
   // 如果启用了"记忆上次文件夹"，恢复上次选择的目录
   if (settingStore.settings.rememberLastDirectory) {
     const lastDirId = directoryStore.restoreLastDirectory()
@@ -366,14 +355,14 @@ onMounted(async () => {
       event.preventDefault()
       openSettings()
     }
-    // Cmd+Shift+D：把当前笔记钉到桌面 / 从桌面收起
-    if (event.metaKey && event.shiftKey && event.code === 'KeyD') {
+    // Cmd+Shift+D（macOS）/ Ctrl+Shift+D（Windows）：把当前笔记钉到桌面 / 从桌面收起
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'KeyD') {
       event.preventDefault()
       const noteId = noteStore.currentNoteId
       if (noteId) void desktopNotes.toggle(noteId)
       return
     }
-    if (event.metaKey && event.code === 'KeyW') {
+    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyW') {
       event.preventDefault()
       if (settingStore.settings.closeBehavior === 'quit') {
         invoke('exit_app')
@@ -388,8 +377,6 @@ onMounted(async () => {
 
   // 标记初始化完成
   isAppReady.value = true
-  // 冷启动时自动检查更新
-  await checkForUpdates()
 })
 
 onUnmounted(() => {
@@ -437,23 +424,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 更新提示 -->
-      <div v-if="showUpdateToast" class="update-toast">
-        <div class="update-toast-content">
-          <i v-if="downloadState === 'downloading'" class="i-mdi-loading animate-spin"></i>
-          <i v-else class="i-mdi-update"></i>
-          <span v-if="downloadState === 'downloading'">{{ $t('app.downloading', { progress: downloadProgress }) }}</span>
-          <span v-else>{{ $t('app.updateFound', { version: latestVersion }) }}</span>
-        </div>
-        <button
-          class="update-toast-btn"
-          :disabled="downloadState === 'downloading'"
-          @click="downloadAndInstall"
-        >
-          <span v-if="downloadState === 'downloading'">{{ downloadProgress }}%</span>
-          <span v-else>{{ $t('app.download') }}</span>
-        </button>
-      </div>
     </div>
 
     <!-- 首次启动：先把隐私承诺摊在面前，点「我知道了」才进主界面（只弹一次） -->

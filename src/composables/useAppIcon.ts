@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { isMac } from '@/utils/platform'
 
 /** 后端 apply_app_icon 的返回结构 */
 export interface AppIconReport {
@@ -24,6 +25,8 @@ export const appIconError = ref('')
  */
 export async function syncAppIcon(variant: string): Promise<AppIconReport | null> {
   if (!variant) return null
+  // Windows 上 exe 图标来自资源文件，无法运行期更换；应用内 Logo 前端自己会切换
+  if (!isMac) return null
   try {
     const report = await invoke<AppIconReport>('apply_app_icon', { variant })
     appIconReport.value = report

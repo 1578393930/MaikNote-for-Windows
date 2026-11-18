@@ -26,3 +26,12 @@ dist-ssr
 
 # Tauri updater signing keys
 keys/
+
+# Windows build temp dirs (esbuild/NSIS download caches)
+.tmp
+
+# Rust build output
+src-tauri/target
+
+# Portable release artifacts
+release-portable

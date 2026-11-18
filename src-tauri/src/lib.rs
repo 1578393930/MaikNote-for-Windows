@@ -5,6 +5,7 @@ pub mod desktop_note;
 pub mod permissions;
 pub mod skills_sync;
 pub mod tray;
+pub mod webdav;
 pub mod workspace;
 
 use std::collections::HashMap;
@@ -12,9 +13,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+#[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+#[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
 use serde::{Deserialize, Serialize};
 
@@ -161,6 +164,7 @@ struct WindowAlphaState {
 
 /// 每个「显示器 + Space」的窗口最后位置（[x, y]，Quartz 全局坐标 points，原点在主屏左下）。
 /// ready 用于跳过启动阶段 window-state 恢复 / 强制居中产生的 Moved 事件，避免误记或误写盘。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct WindowPositionState {
     positions: Mutex<HashMap<String, [f64; 2]>>,
     ready: AtomicBool,
@@ -227,6 +231,37 @@ fn parse_shortcut_str(shortcut_str: &str) -> Result<Shortcut, String> {
                     "Enter" | "Return" => Some(Code::Enter),
                     "Tab" => Some(Code::Tab),
                     "Escape" | "Esc" => Some(Code::Escape),
+                    "Backspace" => Some(Code::Backspace),
+                    "Delete" | "Del" => Some(Code::Delete),
+                    // 符号键
+                    "[" | "BracketLeft" => Some(Code::BracketLeft),
+                    "]" | "BracketRight" => Some(Code::BracketRight),
+                    "/" | "Slash" => Some(Code::Slash),
+                    "\\" | "Backslash" => Some(Code::Backslash),
+                    "," | "Comma" => Some(Code::Comma),
+                    "." | "Period" => Some(Code::Period),
+                    ";" | "Semicolon" => Some(Code::Semicolon),
+                    "'" | "Quote" => Some(Code::Quote),
+                    "-" | "Minus" => Some(Code::Minus),
+                    "=" | "Equal" => Some(Code::Equal),
+                    // 方向键
+                    "ArrowUp" | "Up" => Some(Code::ArrowUp),
+                    "ArrowDown" | "Down" => Some(Code::ArrowDown),
+                    "ArrowLeft" | "Left" => Some(Code::ArrowLeft),
+                    "ArrowRight" | "Right" => Some(Code::ArrowRight),
+                    // F1-F12
+                    "F1" => Some(Code::F1),
+                    "F2" => Some(Code::F2),
+                    "F3" => Some(Code::F3),
+                    "F4" => Some(Code::F4),
+                    "F5" => Some(Code::F5),
+                    "F6" => Some(Code::F6),
+                    "F7" => Some(Code::F7),
+                    "F8" => Some(Code::F8),
+                    "F9" => Some(Code::F9),
+                    "F10" => Some(Code::F10),
+                    "F11" => Some(Code::F11),
+                    "F12" => Some(Code::F12),
                     // 修饰键（作为主要按键时）
                     "MetaLeft" | "MetaRight" | "Meta" => Some(Code::MetaLeft),
                     "ControlLeft" | "ControlRight" | "Ctrl" => Some(Code::ControlLeft),
@@ -296,7 +331,17 @@ async fn register_global_shortcut(
                                 let _ = app_clone.emit("marknote:main-toggled", true);
                             }
                             #[cfg(not(target_os = "macos"))]
-                            show_window_current_space_impl(&app_clone);
+                            {
+                                // Windows：可见即隐藏、隐藏则唤起，真正的「召之即来挥之即去」
+                                let visible = window.is_visible().unwrap_or(false);
+                                if visible {
+                                    let _ = window.hide();
+                                    let _ = app_clone.emit("marknote:main-toggled", false);
+                                } else {
+                                    show_window_current_space_impl(&app_clone);
+                                    let _ = app_clone.emit("marknote:main-toggled", true);
+                                }
+                            }
                         }
                     });
                 }
@@ -602,29 +647,111 @@ pub(crate) fn show_window_current_space_impl(app: &AppHandle) {
     }
 }
 
-/// Get the iCloud path for storing notes
+/// 笔记存储根目录：macOS 在 iCloud，Windows 在「文档\MaikNote」（可另建自定义空间）
 #[tauri::command]
-async fn get_icloud_path() -> Result<String, String> {
-    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let path = format!("{}/Library/Mobile Documents/com~apple~CloudDocs/MaikNote", home);
+async fn get_icloud_path(app: AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+        let path = format!("{}/Library/Mobile Documents/com~apple~CloudDocs/MaikNote", home);
 
-    // Create directory if it doesn't exist
-    fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        // Create directory if it doesn't exist
+        fs::create_dir_all(&path).map_err(|e| e.to_string())?;
 
-    Ok(path)
+        Ok(path)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let dir = app
+            .path()
+            .document_dir()
+            .map_err(|e| format!("获取文档目录失败: {e}"))?
+            .join("MaikNote");
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        // 统一用 / 分隔，前端按 / 拼接相对路径
+        Ok(dir.to_string_lossy().replace('\\', "/"))
+    }
+}
+
+/// 读取 JSON 索引文件；内容缺失时返回空结构，
+/// 内容存在但不是合法 JSON（损坏）时先备份成 `<原名>.corrupt-<时间戳>` 再返回空结构，
+/// 避免上层用空索引把损坏文件直接覆盖掉。
+fn read_json_with_backup(path: &std::path::Path, empty_payload: &str) -> Result<String, String> {
+    if !path.exists() {
+        return Ok(empty_payload.to_string());
+    }
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let trimmed = content.trim();
+    let corrupt = trimmed.is_empty()
+        || serde_json::from_str::<serde_json::Value>(trimmed).is_err();
+    if corrupt {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let backup = path.with_extension(format!("json.corrupt-{}", webdav::stamp_from_unix(secs).replace('-', "")));
+        let _ = fs::copy(path, &backup);
+        return Ok(empty_payload.to_string());
+    }
+    Ok(content)
 }
 
 /// Read metadata.json file
 #[tauri::command]
 async fn read_metadata(base_path: String) -> Result<String, String> {
     let path = PathBuf::from(base_path).join("metadata.json");
+    read_json_with_backup(&path, r#"{"version":1,"notes":[]}"#)
+}
 
-    if !path.exists() {
-        // Return empty metadata if file doesn't exist
-        return Ok(r#"{"version":1,"notes":[]}"#.to_string());
+#[cfg(test)]
+mod corrupt_backup_tests {
+    use super::*;
+
+    fn temp_root() -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/corrupt-backup-test");
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
-    fs::read_to_string(path).map_err(|e| e.to_string())
+    #[test]
+    fn corrupt_metadata_is_backed_up_and_returns_empty() {
+        let dir = temp_root();
+        let path = dir.join("metadata.json");
+        fs::write(&path, "{ 损坏的 JSON").unwrap();
+
+        let result = read_json_with_backup(&path, r#"{"version":1,"notes":[]}"#).unwrap();
+        assert_eq!(result, r#"{"version":1,"notes":[]}"#);
+
+        // 损坏文件被完整备份，且备份内容可被找回
+        let mut found = false;
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("metadata.json.corrupt-") {
+                let backup = fs::read_to_string(entry.path()).unwrap();
+                assert_eq!(backup, "{ 损坏的 JSON");
+                found = true;
+            }
+        }
+        assert!(found, "应存在 metadata.json.corrupt-* 备份");
+    }
+
+    #[test]
+    fn valid_metadata_passes_through_untouched() {
+        let dir = temp_root();
+        let path = dir.join("metadata-ok.json");
+        fs::write(&path, r#"{"version":2,"notes":[]}"#).unwrap();
+
+        let result = read_json_with_backup(&path, r#"{"version":1,"notes":[]}"#).unwrap();
+        assert_eq!(result, r#"{"version":2,"notes":[]}"#);
+    }
+
+    #[test]
+    fn missing_file_returns_empty_payload() {
+        let dir = temp_root();
+        let path = dir.join("不存在.json");
+        let result = read_json_with_backup(&path, r#"{"version":1}"#).unwrap();
+        assert_eq!(result, r#"{"version":1}"#);
+    }
 }
 
 /// Write metadata.json file
@@ -638,12 +765,7 @@ async fn write_metadata(base_path: String, content: String) -> Result<(), String
 #[tauri::command]
 async fn read_directories(base_path: String) -> Result<String, String> {
     let path = PathBuf::from(base_path).join("directories.json");
-
-    if !path.exists() {
-        return Ok(r#"{"version":1,"directories":[]}"#.to_string());
-    }
-
-    fs::read_to_string(path).map_err(|e| e.to_string())
+    read_json_with_backup(&path, r#"{"version":1,"directories":[]}"#)
 }
 
 /// Write directories.json file
@@ -734,46 +856,55 @@ async fn write_note(
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
-/// 把文件移动到系统废纸篓（~/.Trash），失败时回退为直接删除。
-/// 返回废纸篓中的新路径（用于提示），回退删除时返回空串。
+/// 把文件移入系统回收站（macOS 废纸篓 / Windows 回收站），失败时回退为直接删除。
+/// 返回回收站中的新路径（用于提示），回退删除时返回空串。
 fn move_to_trash(path: &std::path::Path) -> Result<String, String> {
-    let home = std::env::var("HOME").map_err(|e| format!("读取 HOME 失败: {e}"))?;
-    let trash_dir = PathBuf::from(home).join(".Trash");
-    fs::create_dir_all(&trash_dir).map_err(|e| format!("创建废纸篓目录失败: {e}"))?;
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|e| format!("读取 HOME 失败: {e}"))?;
+        let trash_dir = PathBuf::from(home).join(".Trash");
+        fs::create_dir_all(&trash_dir).map_err(|e| format!("创建废纸篓目录失败: {e}"))?;
 
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "无法解析文件名".to_string())?;
-
-    let mut target = trash_dir.join(file_name);
-    if target.exists() {
-        // 同名文件已存在：加时间戳后缀，避免覆盖废纸篓里的旧文件
-        let stem = path
-            .file_stem()
+        let file_name = path
+            .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("note")
-            .to_string();
-        let ext = path
-            .extension()
-            .and_then(|n| n.to_str())
-            .unwrap_or("md")
-            .to_string();
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        target = trash_dir.join(format!("{stem} {stamp}.{ext}"));
-    }
+            .ok_or_else(|| "无法解析文件名".to_string())?;
 
-    match fs::rename(path, &target) {
-        Ok(()) => Ok(target.to_string_lossy().to_string()),
-        Err(rename_err) => {
-            // 跨卷或废纸篓不可写时回退：直接删除，删除失败则如实报错
-            fs::remove_file(path)
-                .map_err(|e| format!("移入废纸篓失败({rename_err})，删除也失败: {e}"))?;
-            Ok(String::new())
+        let mut target = trash_dir.join(file_name);
+        if target.exists() {
+            // 同名文件已存在：加时间戳后缀，避免覆盖废纸篓里的旧文件
+            let stem = path
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("note")
+                .to_string();
+            let ext = path
+                .extension()
+                .and_then(|n| n.to_str())
+                .unwrap_or("md")
+                .to_string();
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            target = trash_dir.join(format!("{stem} {stamp}.{ext}"));
         }
+
+        match fs::rename(path, &target) {
+            Ok(()) => Ok(target.to_string_lossy().to_string()),
+            Err(rename_err) => {
+                // 跨卷或废纸篓不可写时回退：直接删除，删除失败则如实报错
+                fs::remove_file(path)
+                    .map_err(|e| format!("移入废纸篓失败({rename_err})，删除也失败: {e}"))?;
+                Ok(String::new())
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Windows / Linux：走系统回收站（trash crate），拿不到落点路径，返回空串
+        trash::delete(path).map_err(|e| format!("移入回收站失败: {e}"))?;
+        Ok(String::new())
     }
 }
 
@@ -1092,7 +1223,10 @@ async fn set_note_readonly(base_path: String, dir: Option<String>, file_name: St
         }
         #[cfg(not(unix))]
         {
-            let _ = &path;
+            // Windows：只读属性
+            let mut perms = fs::metadata(&path).map_err(|e| e.to_string())?.permissions();
+            perms.set_readonly(true);
+            fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
         }
     }
 
@@ -1114,7 +1248,10 @@ async fn set_note_readwrite(base_path: String, dir: Option<String>, file_name: S
         }
         #[cfg(not(unix))]
         {
-            let _ = &path;
+            // Windows：清除只读属性
+            let mut perms = fs::metadata(&path).map_err(|e| e.to_string())?.permissions();
+            perms.set_readonly(false);
+            fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
         }
     }
 
@@ -1225,7 +1362,19 @@ async fn set_window_alpha(
             }
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            // Windows：给窗口加 WS_EX_LAYERED 后用 SetLayeredWindowAttributes 调整体透明度
+            use crate::win32;
+            if let Ok(hwnd) = window.hwnd() {
+                let ok = win32::set_window_alpha(hwnd.0 as isize, (clamped_alpha * 255.0).round() as u8);
+                if ok == 0 {
+                    return Err("设置窗口透明度失败".to_string());
+                }
+            }
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let _ = (app, clamped_alpha);
     }
     Ok(())
@@ -1685,8 +1834,9 @@ static EDGE_TRIGGER_ZONE: Mutex<[f64; 4]> = Mutex::new([0.0, 0.0, 0.0, 0.0]);
 /// 热区轮询线程是否已启动
 static EDGE_TRACKER_STARTED: AtomicBool = AtomicBool::new(false);
 
-/// 读取全局光标位置（Quartz 全局坐标 points，左上原点），复用文件内已有的 CGEvent 声明
-fn edge_cursor_location() -> Option<(f64, f64)> {
+/// 读取全局光标位置（逻辑坐标，左上原点），与热区同一坐标系
+fn edge_cursor_location(app: &AppHandle) -> Option<(f64, f64)> {
+    #[cfg(target_os = "macos")]
     unsafe {
         let ev = CGEventCreate(std::ptr::null());
         if ev.is_null() {
@@ -1695,6 +1845,23 @@ fn edge_cursor_location() -> Option<(f64, f64)> {
         let p = CGEventGetLocation(ev);
         CFRelease(ev as *const std::ffi::c_void);
         Some((p.x, p.y))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Tauri 返回物理像素，热区按逻辑像素算：除以光标所在显示器的缩放
+        let pos = app.cursor_position().ok()?;
+        let scale = app
+            .monitor_from_point(pos.x, pos.y)
+            .ok()
+            .flatten()
+            .map(|m| m.scale_factor())
+            .unwrap_or(1.0);
+        Some((pos.x / scale, pos.y / scale))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        None
     }
 }
 
@@ -1711,7 +1878,7 @@ fn start_edge_hover_tracker(app: AppHandle) {
             let trigger = edge_trigger_thickness();
             let mut current = trigger;
             let mut inside = false;
-            let cursor = edge_cursor_location();
+            let cursor = edge_cursor_location(&app);
             if EDGE_ENABLED.load(Ordering::Relaxed) && EDGE_VISIBLE.load(Ordering::Relaxed) {
                 current = *EDGE_CURRENT_WIDTH.lock().unwrap_or_else(|e| e.into_inner());
                 let band = *EDGE_TRIGGER_ZONE.lock().unwrap_or_else(|e| e.into_inner());
@@ -1896,6 +2063,8 @@ fn apply_edge_layout<R: tauri::Runtime>(
     Ok(())
 }
 
+/// 让边缘窗口在非激活状态下也能接住第一次点击（否则点复制要先点一下激活窗口）
+#[cfg(target_os = "macos")]
 #[link(name = "objc")]
 extern "C" {
     fn sel_registerName(name: *const std::os::raw::c_char) -> *const std::ffi::c_void;
@@ -2012,6 +2181,12 @@ fn init_edge_window(app: AppHandle) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         if !EDGE_WINDOW_STYLED.swap(true, Ordering::Relaxed) {
             style_edge_window(&win);
+        }
+        #[cfg(target_os = "windows")]
+        if !EDGE_WINDOW_STYLED.swap(true, Ordering::Relaxed) {
+            // Windows：亚克力磨玻璃 + 置顶已在 tauri.conf.json 配置
+            let _ = window_vibrancy::apply_acrylic(&win, Some((24, 24, 24, 100)));
+            let _ = win.set_always_on_top(true);
         }
         let _ = apply_edge_layout(&handle, &win, edge_trigger_thickness());
         let _ = win.show();
@@ -2135,6 +2310,11 @@ fn toggle_edge_panel_impl(app: &AppHandle) {
             if !EDGE_WINDOW_STYLED.swap(true, Ordering::Relaxed) {
                 style_edge_window(&win);
             }
+            #[cfg(target_os = "windows")]
+            if !EDGE_WINDOW_STYLED.swap(true, Ordering::Relaxed) {
+                let _ = window_vibrancy::apply_acrylic(&win, Some((24, 24, 24, 100)));
+                let _ = win.set_always_on_top(true);
+            }
             let width = if pinned { edge_panel_thickness() } else { edge_trigger_thickness() };
             let _ = apply_edge_layout(&handle, &win, width);
             if pinned {
@@ -2227,44 +2407,96 @@ async fn register_edge_shortcut(
 /// 读取系统剪贴板文本（边缘面板右键「粘贴」用）
 #[tauri::command]
 fn read_clipboard(app: AppHandle) -> Result<String, String> {
-    use objc2::msg_send;
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    app.run_on_main_thread(move || {
-        let text = unsafe {
-            let pb: *mut objc2::runtime::AnyObject =
-                msg_send![objc2::class!(NSPasteboard), generalPasteboard];
-            if pb.is_null() {
-                String::new()
-            } else {
-                let ty_c = std::ffi::CString::new("public.utf8-plain-text").unwrap();
-                let ty: *mut objc2::runtime::AnyObject = msg_send![
-                    objc2::class!(NSString),
-                    stringWithUTF8String: ty_c.as_ptr()
-                ];
-                let value: *mut objc2::runtime::AnyObject = msg_send![pb, stringForType: ty];
-                if value.is_null() {
+    #[cfg(target_os = "windows")]
+    {
+        // Windows：直接用剪贴板插件读文本
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+        return app.clipboard().read_text().map_err(|e| e.to_string());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        use objc2::msg_send;
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        app.run_on_main_thread(move || {
+            let text = unsafe {
+                let pb: *mut objc2::runtime::AnyObject =
+                    msg_send![objc2::class!(NSPasteboard), generalPasteboard];
+                if pb.is_null() {
                     String::new()
                 } else {
-                    let bytes: *const std::os::raw::c_char = msg_send![value, UTF8String];
-                    if bytes.is_null() {
+                    let ty_c = std::ffi::CString::new("public.utf8-plain-text").unwrap();
+                    let ty: *mut objc2::runtime::AnyObject = msg_send![
+                        objc2::class!(NSString),
+                        stringWithUTF8String: ty_c.as_ptr()
+                    ];
+                    let value: *mut objc2::runtime::AnyObject = msg_send![pb, stringForType: ty];
+                    if value.is_null() {
                         String::new()
                     } else {
-                        std::ffi::CStr::from_ptr(bytes).to_string_lossy().into_owned()
+                        let bytes: *const std::os::raw::c_char = msg_send![value, UTF8String];
+                        if bytes.is_null() {
+                            String::new()
+                        } else {
+                            std::ffi::CStr::from_ptr(bytes).to_string_lossy().into_owned()
+                        }
                     }
                 }
+            };
+            let _ = tx.send(text);
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(2))
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Windows API 薄封装：只声明用到的几个 user32 函数，避免引入整个 windows crate
+#[cfg(target_os = "windows")]
+pub(crate) mod win32 {
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_LAYERED: isize = 0x0008_0000;
+    const LWA_ALPHA: u32 = 0x2;
+    pub const HWND_BOTTOM: isize = 1;
+    pub const SWP_NOSIZE: u32 = 0x1;
+    pub const SWP_NOMOVE: u32 = 0x2;
+    pub const SWP_NOACTIVATE: u32 = 0x10;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetWindowLongPtrW(hwnd: isize, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
+        fn SetLayeredWindowAttributes(hwnd: isize, cr_key: u32, alpha: u8, flags: u32) -> i32;
+        pub fn SetWindowPos(
+            hwnd: isize,
+            after: isize,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> i32;
+    }
+
+    /// 设置整窗透明度（0-255）。首次调用会自动加上 WS_EX_LAYERED 样式。
+    pub fn set_window_alpha(hwnd: isize, alpha: u8) -> i32 {
+        unsafe {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if ex & WS_EX_LAYERED == 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
             }
-        };
-        let _ = tx.send(text);
-    })
-    .map_err(|e| e.to_string())?;
-    rx.recv_timeout(std::time::Duration::from_secs(2))
-        .map_err(|e| e.to_string())
+            SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA)
+        }
+    }
+
+    /// 把窗口压到 Z 序底层/恢复正常层级（桌面卡片「贴桌面」档用）
+    pub fn set_window_zorder(hwnd: isize, after: isize) -> i32 {
+        unsafe { SetWindowPos(hwnd, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
+    }
 }
 
 pub fn run() {
     // 检测是否是开机自启启动
     let is_autolaunch = autostart::is_autolaunch();
-
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
@@ -2474,6 +2706,19 @@ pub fn run() {
                 }
             }
 
+            // Windows / Linux：亚克力毛玻璃 + 冷启动直接亮相；开机自启时先藏着，等快捷键唤起
+            #[cfg(not(target_os = "macos"))]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window_vibrancy::apply_acrylic(&window, Some((32, 32, 32, 125)));
+                    if is_autolaunch {
+                        let _ = window.hide();
+                    } else {
+                        tray::reveal_on_launch(app.handle());
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2540,6 +2785,8 @@ pub fn run() {
             workspace::validate_workspace_dir,
             workspace::scan_workspace_dir,
             workspace::copy_workspace_entry,
+            webdav::webdav_test_connection,
+            webdav::webdav_sync_now,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

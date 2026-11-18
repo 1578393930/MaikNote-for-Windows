@@ -48,6 +48,7 @@ pub struct SkillSyncStatus {
 
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
@@ -193,7 +194,10 @@ pub fn skill_sync_link(app: AppHandle, key: String) -> Result<SkillSyncStatus, S
         Ok(meta) if meta.file_type().is_symlink() => {
             let current = fs::read_link(&dest).unwrap_or_default();
             if !same_dir(&current, &source) {
-                fs::remove_file(&dest).map_err(|e| format!("移除旧链接失败: {e}"))?;
+                // Windows 上指向目录的软链接要用 remove_dir 删
+                if fs::remove_file(&dest).is_err() {
+                    fs::remove_dir(&dest).map_err(|e| format!("移除旧链接失败: {e}"))?;
+                }
             }
         }
         // 真实目录/文件占位：改名备份，绝不直接删用户文件
@@ -209,7 +213,17 @@ pub fn skill_sync_link(app: AppHandle, key: String) -> Result<SkillSyncStatus, S
         #[cfg(unix)]
         std::os::unix::fs::symlink(&source, &dest)
             .map_err(|e| format!("创建软链接失败 {}: {e}", dest.display()))?;
-        #[cfg(not(unix))]
+        #[cfg(target_os = "windows")]
+        std::os::windows::fs::symlink_dir(&source, &dest).map_err(|e| {
+            let hint = if e.raw_os_error() == Some(1314) {
+                // ERROR_PRIVILEGE_NOT_HELD：需要开发者模式或管理员权限
+                "（Windows 创建目录软链接需要开启「开发者模式」或以管理员运行）"
+            } else {
+                ""
+            };
+            format!("创建软链接失败 {} {hint}: {e}", dest.display())
+        })?;
+        #[cfg(not(any(unix, target_os = "windows")))]
         return Err("当前平台不支持软链接".to_string());
     }
 
@@ -225,7 +239,10 @@ pub fn skill_sync_unlink(app: AppHandle, key: String) -> Result<SkillSyncStatus,
         if meta.file_type().is_symlink() {
             let current = fs::read_link(&dest).unwrap_or_default();
             if same_dir(&current, &source) {
-                fs::remove_file(&dest).map_err(|e| format!("移除软链接失败: {e}"))?;
+                // Windows 上指向目录的软链接要用 remove_dir 删
+                if fs::remove_file(&dest).is_err() {
+                    fs::remove_dir(&dest).map_err(|e| format!("移除软链接失败: {e}"))?;
+                }
             }
         }
     }

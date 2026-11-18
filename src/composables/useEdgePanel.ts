@@ -50,6 +50,8 @@ export interface EdgePrefsPayload {
   stripWidth: number
   stripColor: string
   copyOnSelect: boolean
+  /** 界面语言：边缘窗口常驻，切换语言要跟着刷新 */
+  language?: string
 }
 
 interface EdgeEditPayload {
@@ -242,6 +244,7 @@ export function useEdgePanel() {
       stripWidth: settingStore.settings.edgeStripWidth,
       stripColor: settingStore.settings.edgeStripColor,
       copyOnSelect: settingStore.settings.edgeCopyOnSelect,
+      language: settingStore.settings.language,
     }
     await invoke('set_edge_prefs', { ...prefs }).catch(() => {})
     await emit(PREFS_EVENT, prefs).catch(() => {})
@@ -259,6 +262,7 @@ export function useEdgePanel() {
       settingStore.settings.edgeStripWidth,
       settingStore.settings.edgeStripColor,
       settingStore.settings.edgeCopyOnSelect,
+      settingStore.settings.language,
     ].join('|'),
     () => {
       void pushPrefs()

@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { isMac } from '@/utils/platform'
 import { useNoteStore } from '@/stores/noteStore'
 import { useDirectoryStore } from '@/stores/directoryStore'
 import { useSettingStore } from '@/stores/settingStore'
@@ -191,15 +192,15 @@ export function useShortcuts(onOpenSettings?: () => void) {
       noteStore.searchQuery = ''
     }
 
-    // Cmd+F: 聚焦搜索框
-    if (e.metaKey && e.code === 'KeyF') {
+    // 搜索聚焦（macOS: Cmd+F / Windows: Ctrl+F）
+    if ((isMac ? e.metaKey : e.ctrlKey) && e.altKey === false && e.code === 'KeyF') {
       e.preventDefault()
       const searchInput = document.querySelector('[data-search-input]') as HTMLInputElement
       searchInput?.focus()
     }
 
-    // Cmd+W: 隐藏窗口
-    if (e.metaKey && e.code === 'KeyW') {
+    // 隐藏窗口（macOS: Cmd+W / Windows: Ctrl+W）
+    if ((isMac ? e.metaKey : e.ctrlKey) && e.code === 'KeyW') {
       e.preventDefault()
       try {
         const appWindow = getCurrentWindow()
@@ -210,8 +211,8 @@ export function useShortcuts(onOpenSettings?: () => void) {
       return
     }
 
-    // Cmd+, : 打开设置（使用 e.code 判断物理按键，避开输入法干扰）
-    if (e.metaKey && e.code === 'Comma') {
+    // 打开设置（macOS: Cmd+, / Windows: Ctrl+,；使用 e.code 判断物理按键，避开输入法干扰）
+    if ((isMac ? e.metaKey : e.ctrlKey) && e.code === 'Comma') {
       e.preventDefault()
       onOpenSettings?.()
     }

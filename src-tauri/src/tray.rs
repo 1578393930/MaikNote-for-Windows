@@ -10,7 +10,16 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager};
 
 /// 模板图：纯黑 + alpha。声明成模板后由 macOS 按菜单栏明暗自动染色，不用准备两套。
+/// 非 macOS（Windows 托盘）用彩色图标，模板图标会渲染成纯黑看不清。
+#[cfg(target_os = "macos")]
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-template.png");
+#[cfg(not(target_os = "macos"))]
+const TRAY_ICON: &[u8] = include_bytes!("../icons/32x32.png");
+
+#[cfg(target_os = "macos")]
+const TRAY_TOOLTIP: &str = "MaikNote · ⌥⌘A";
+#[cfg(not(target_os = "macos"))]
+const TRAY_TOOLTIP: &str = "MaikNote · Ctrl+Alt+A";
 
 const TRAY_ID: &str = "maiknote-tray";
 
@@ -68,8 +77,8 @@ fn create(app: &AppHandle, lang: Lang) -> tauri::Result<tauri::tray::TrayIcon<ta
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(TRAY_ICON)?)
-        .icon_as_template(true)
-        .tooltip("MaikNote · ⌥⌘A")
+        .icon_as_template(cfg!(target_os = "macos"))
+        .tooltip(TRAY_TOOLTIP)
         .menu(&menu)
         // 左键留给「切换窗口」，右键才出菜单（和系统里其它常驻应用一致）
         .show_menu_on_left_click(false)

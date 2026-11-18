@@ -30,8 +30,8 @@ const pledgeKeys = [
   'settings.privacyExit',
 ] as const
 
-const authorEmail = '7w0v0w7@gmail.com'
-const authorHome = 'https://www.91kfc.vip/'
+const authorEmail = 'sansui@jun-mou.top'
+const authorHome = 'https://gitee.com/wyq517'
 const copied = ref(false)
 let copiedTimer: number | undefined
 
@@ -56,11 +56,14 @@ function openHome() {
   void openUrl(authorHome).catch(() => {})
 }
 
-/** 致谢名单：点名字直接开 GitHub 主页 */
-const thanksUsers = ['cat-clever', 'kinzun', 'zhanggang807'] as const
+/** 原版作者链接指向仓库，其余贡献者链接指向 GitHub 主页。 */
+const thanksUsers = [
+  { name: 'Aprilming', url: 'https://github.com/Aprilming/maiknote' },
+  ...['cat-clever', 'kinzun', 'zhanggang807'].map(name => ({ name, url: `https://github.com/${name}` })),
+]
 
-function openProfile(name: string) {
-  void openUrl(`https://github.com/${name}`).catch(() => {})
+function openProfile(url: string) {
+  void openUrl(url).catch(() => {})
 }
 </script>
 
@@ -94,13 +97,13 @@ function openProfile(name: string) {
       <i class="i-mdi-heart-outline"></i>
       <span class="pp-thanks-text">
         {{ t('welcome.thanksLead') }}
-        <template v-for="(name, index) in thanksUsers" :key="name">
+        <template v-for="(user, index) in thanksUsers" :key="user.name">
           <span v-if="index > 0" class="pp-thanks-sep">{{ t('welcome.thanksSep') }}</span>
           <a
             class="pp-thanks-link"
-            :href="`https://github.com/${name}`"
-            @click.prevent="openProfile(name)"
-            >{{ name }}</a
+            :href="user.url"
+            @click.prevent="openProfile(user.url)"
+            >{{ user.name }}</a
           >
         </template>
         {{ t('welcome.thanksTail') }}

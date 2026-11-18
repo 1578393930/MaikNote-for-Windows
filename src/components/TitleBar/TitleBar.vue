@@ -9,6 +9,7 @@ import { useSettingStore } from '@/stores/settingStore'
 import { setNativeDialogOpen } from '@/stores/dialogStore'
 import { usePinWindow } from '@/composables/usePinWindow'
 import { useDesktopNotes } from '@/composables/useDesktopNotes'
+import { isWindows } from '@/utils/platform'
 
 const noteStore = useNoteStore()
 const settingStore = useSettingStore()
@@ -259,16 +260,21 @@ onUnmounted(() => {
       :class="{ visible: titleBarVisible }"
       @mousedown="startDrag"
     >
-    <!-- Window Controls -->
-    <div class="window-controls">
-      <button class="window-btn close" @click="closeWindow" :title="$t('titlebar.close')">
+    <!-- Window Controls：macOS 左侧红绿灯 / Windows 右上角线性按钮 -->
+    <div class="window-controls" :class="{ 'win-controls': isWindows }">
+      <button v-if="!isWindows" class="window-btn close" @click="closeWindow" :title="$t('titlebar.close')">
         <span class="dot"></span>
       </button>
-      <button class="window-btn minimize" @click="minimizeWindow" :title="$t('titlebar.minimize')">
-        <span class="dot"></span>
+      <button class="window-btn minimize" :class="{ win: isWindows }" @click="minimizeWindow" :title="$t('titlebar.minimize')">
+        <span v-if="isWindows" class="win-glyph">─</span>
+        <span v-else class="dot"></span>
       </button>
-      <button class="window-btn fullscreen" @click="toggleFullscreen" :title="$t('titlebar.fullscreen')">
-        <span class="dot"></span>
+      <button class="window-btn fullscreen" :class="{ win: isWindows }" @click="toggleFullscreen" :title="$t('titlebar.fullscreen')">
+        <span v-if="isWindows" class="win-glyph">□</span>
+        <span v-else class="dot"></span>
+      </button>
+      <button v-if="isWindows" class="window-btn win close-win" @click="closeWindow" :title="$t('titlebar.close')">
+        <span class="win-glyph">✕</span>
       </button>
     </div>
 
@@ -440,6 +446,41 @@ onUnmounted(() => {
 
 .window-btn.fullscreen {
   background-color: #28c840;
+}
+
+/* Windows 风格：控件挪到标题条最右端，线性符号按钮，关闭键悬停变红 */
+.window-controls.win-controls {
+  order: 100;
+  margin-left: 8px;
+  gap: 2px;
+}
+
+.window-controls.win-controls .window-btn {
+  width: 40px;
+  height: 28px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.window-controls.win-controls .window-btn:hover {
+  opacity: 1;
+  transform: none;
+  background: color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+.window-controls.win-controls .window-btn.close-win:hover {
+  background: #e81123;
+}
+
+.window-controls.win-controls .window-btn.close-win:hover .win-glyph {
+  color: #fff;
+}
+
+.window-controls.win-controls .win-glyph {
+  display: block;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--color-text);
 }
 
 /* 弹性占位，撑开标题与右侧操作区 */
