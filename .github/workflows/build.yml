@@ -1,103 +1,103 @@
-name: Build
+name: Windows Release
 
 on:
-  # 只在打 tag 时编译发布；main 分支与 PR 不构建
-  # （main 分支的 Rust 缓存预热见 warm-cache.yml：tag 缓存在独立 ref 域，不复用）
   push:
-    tags: ['**']
+    tags: ['v*']
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # 发布：tag 推送时构建双架构
-  release:
-    strategy:
-      # 一个架构失败不连坐另一个
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            runner: macos-latest
-            artifact: MaikNote-aarch64
-          - target: x86_64-apple-darwin
-            runner: macos-latest
-            artifact: MaikNote-x86_64
-    runs-on: ${{ matrix.runner }}
-    env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  build:
+    if: github.repository == '1578393930/MaikNote-for-Windows'
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{ matrix.target }}
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          key: ${{ matrix.target }}
-          # 缓存统一由 warm-cache.yml 在 main 上生成；tag 构建只读不写，
-          # 省掉每次 ~35s 的缓存上传
-          save-if: false
+          key: windows-x64
+      - name: Check source upload policy
+        run: node scripts/check-upload-files.mjs
       - run: npm ci
-      - run: APP_VERSION="${GITHUB_REF_NAME#v}" npm run tauri build -- --target ${{ matrix.target }}
-      # 注入小组件扩展、重签、重打 dmg 与 updater 包
+      - name: Validate release version and repository
+        id: release-version
+        shell: pwsh
+        run: |
+          node scripts/check-release.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = (Get-Content version.json | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            if ('${{ github.ref_name }}' -cne "v$version") { throw 'Tag must equal v + version.json version' }
+          }
+      - run: npm test
+      - run: node --test scripts/verify-updater-signature.test.mjs
+      - name: Build signed Windows installer
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./scripts/tauri-build-signed.ps1 "$pwd"
+      - name: Prepare and verify release assets
+        run: node scripts/make-latest-json.mjs
+      - name: Build portable archive
+        shell: pwsh
+        run: ./scripts/make-portable.ps1 -Root "$pwd"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: windows-release
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
-
-  # 合并双架构产物，创建 GitHub Release
-  create-release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: release
+            release-portable/MaikNote_${{ steps.release-version.outputs.version }}_x64-setup.exe
+            release-portable/MaikNote_${{ steps.release-version.outputs.version }}_x64-setup.exe.sig
+            release-portable/MaikNote_${{ steps.release-version.outputs.version }}_x64-portable.zip
+            release-portable/latest.json
+          if-no-files-found: error
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - name: Prepare Release Assets
-        run: |
-          mkdir -p release-assets update-artifacts
-          # DMG 文件名自带架构后缀，直接复制
-          find MaikNote-aarch64 -name '*.dmg' -exec cp {} release-assets/ \;
-          find MaikNote-x86_64  -name '*.dmg' -exec cp {} release-assets/ \;
-          # .app.tar.gz 和 .sig 同名无架构后缀，复制时重命名加上架构
-          find MaikNote-aarch64 -name '*.app.tar.gz'     -exec sh -c 'for f; do cp "$f" "update-artifacts/$(basename "${f%.tar.gz}")_aarch64.app.tar.gz"; done' _ {} +
-          find MaikNote-x86_64  -name '*.app.tar.gz'     -exec sh -c 'for f; do cp "$f" "update-artifacts/$(basename "${f%.tar.gz}")_x86_64.app.tar.gz"; done' _ {} +
-          find MaikNote-aarch64 -name '*.app.tar.gz.sig' -exec sh -c 'for f; do cp "$f" "update-artifacts/$(basename "${f%.sig}")_aarch64.app.tar.gz.sig"; done' _ {} +
-          find MaikNote-x86_64  -name '*.app.tar.gz.sig' -exec sh -c 'for f; do cp "$f" "update-artifacts/$(basename "${f%.sig}")_x86_64.app.tar.gz.sig"; done' _ {} +
-          ls -la release-assets/
-          ls -la update-artifacts/
-      - name: Generate latest.json
-        run: node scripts/generate-latest-json.js "${{ github.ref_name }}"
-      - name: Create Release
-        run: |
-          shopt -s nullglob
-          ASSETS=()
-          for f in release-assets/*.dmg update-artifacts/*.app.tar.gz update-artifacts/*.app.tar.gz.sig latest.json; do
-            [[ -f "$f" ]] && ASSETS+=("$f")
-          done
-          gh release create "${{ github.ref_name }}" \
-            --title "${{ github.ref_name }}" \
-            --generate-notes \
-            "${ASSETS[@]}"
+          name: windows-release
+          path: release-assets
+      - name: Create draft release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          assets=(
+            "release-assets/MaikNote_${version}_x64-setup.exe"
+            "release-assets/MaikNote_${version}_x64-setup.exe.sig"
+            "release-assets/MaikNote_${version}_x64-portable.zip"
+            "release-assets/latest.json"
+          )
+          for asset in "${assets[@]}"; do
+            [[ -f "$asset" && -s "$asset" && ! -L "$asset" ]] || { echo "Missing or invalid release asset: $asset"; exit 1; }
+          done
+          shopt -s nullglob dotglob
+          entries=(release-assets/*)
+          [[ ${#entries[@]} -eq 4 ]] || { echo 'Unexpected release files: only the four current-version assets are allowed'; exit 1; }
+          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json; then
+            node -e "if (!JSON.parse(require('fs').readFileSync('release-state.json')).isDraft) throw Error('Refusing to overwrite a published release')"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG"
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber

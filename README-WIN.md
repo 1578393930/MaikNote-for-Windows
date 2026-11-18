@@ -8,10 +8,11 @@
 >
 > - **原作者**：[Aprilming](https://github.com/Aprilming) —— 本项目的核心架构、功能设计与绝大部分代码均出自原项目
 > - **Windows 版迁移与二次开发**：sansui · [gitee.com/wyq517](https://gitee.com/wyq517)
+> - **本仓库维护与发布**：[1578393930/MaikNote-for-Windows](https://github.com/1578393930/MaikNote-for-Windows)
 
-macOS 原生 AI Markdown 悬浮便签应用 [MaikNote](https://github.com/Aprilming/maiknote) 的 **Windows 完整移植版**。
+macOS AI Markdown 悬浮便签应用 [MaikNote](https://github.com/Aprilming/maiknote) 的 **Windows 移植与二次开发版本**。
 
-原项目完全通过 vibe coding 开发，本仓库在其基础上将 macOS 专属实现全部替换为 Windows 等价物，功能与交互保持一致。
+保留原项目的编辑器与主要交互，并适配 Windows 存储、窗口、快捷键和同步；桌面层级、图标等系统能力存在下表所列差异。
 
 ## 与 macOS 版的差异
 
@@ -32,11 +33,11 @@ macOS 原生 AI Markdown 悬浮便签应用 [MaikNote](https://github.com/Aprilm
 | 剪贴板写入 | NSPasteboard | Rust 剪贴板插件优先（未聚焦窗口也能复制），Clipboard API / execCommand 兜底 |
 | 粘贴纯文本 Markdown | 原生粘贴解析 | 纯文本粘贴自动识别 Markdown 形态并解析渲染（普通纯文本不转换） |
 
-其余功能（WYSIWYG 编辑器、块菜单、桌面卡片、边缘面板、AI 助手、多工作空间、中英双语、主题等）与原版一致。
+Windows 版保留 WYSIWYG 编辑器、块菜单、桌面卡片、边缘面板、AI 助手、多工作空间、中英双语和主题等功能，具体表现以 Windows 构建为准。
 
 ## 构建要求
 
-- Node.js 20+
+- Node.js 22+
 - Rust 1.85+（stable-x86_64-pc-windows-msvc）
 - Visual Studio 2022/2026（MSVC C++ 生成工具）
 - WebView2 Runtime（Win10/11 一般已内置）
@@ -44,16 +45,38 @@ macOS 原生 AI Markdown 悬浮便签应用 [MaikNote](https://github.com/Aprilm
 ## 构建与开发
 
 ```bat
+npm ci               REM 首次安装依赖
 build-win.bat dev     REM 开发热重载
-build-win.bat         REM 打包 NSIS 安装包
+build-win.bat         REM 打包 NSIS 安装包（含更新签名 + latest.json）
 ```
 
-`build-win.bat` 已处理两个环境坑：
+### 手动检查与安装更新（发布流程）
+
+更新签名使用 minisign 密钥对，私钥在本地 `keys\maiknote.key`（**已 gitignore，勿提交、勿丢失**——丢失后已发布版本的自动更新无法继续签名，需换密钥并重新发版）。
+
+本仓库的发布目标固定为 **1578393930/MaikNote-for-Windows**。Windows 更新地址不会使用上游 Aprilming 仓库。
+
+完整配置、发布和验收步骤见 [Windows 发布与更新](docs/windows-release.md)。常用流程：
+
+1. 首次在本仓库 Actions Secrets 配置 `TAURI_SIGNING_PRIVATE_KEY`（现有 `keys\maiknote.key` 的完整内容）；有密码时另配 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+2. 修改 `version.json` 为更高的正式版本，执行 `npm run sync-version`，提交版本文件和本次发布的代码。
+3. 推送提交和对应的 `vX.Y.Z` tag 到 **origin**。GitHub Actions 自动测试、构建 Windows x64 安装包、验证签名、生成清单和便携 ZIP，上传到 Release 草稿。
+4. 检查草稿中的四个附件，将完整发布标题和说明交给维护者确认，再点击 Publish release，并将此正式版本设为 Latest。旧版本在「设置 → 关于 → 检查更新」手动检查后可发现新版。
+
+也可以执行 `build-win.bat` 本地构建：四个发布附件统一位于 `release-portable/`，上传到同版本 tag 的 Release 即可。不要上传私钥。
+
+应用内更新为用户手动触发，下载完整安装包；下载签名验证通过后，触发待保存笔记落盘，再交给安装器退出和更新。便携版的应用内更新同样使用安装器；若要保持便携使用，请退出应用后手动用新 ZIP 替换程序文件。
+
+`build-win.bat` 通过 `scripts/tauri-build-signed.ps1` 读取本地 `.tauri-signing.env`（`TAURI_SIGNING_PRIVATE_KEY_PATH=keys/maiknote.key`）注入签名环境；密钥文件缺失时构建会明确报错。
+
+`build-win.bat` 已处理以下构建环境问题：
 
 1. **PATH 顺序**：先加 `%USERPROFILE%\.cargo\bin` 再 call vcvars64.bat（反过来的话 cmd 的解析期展开会把 VS 目录从 PATH 里抹掉）；
 2. **`CRATE_CC_NO_DEFAULTS=1`**：去掉 cc-rs 默认注入的 `-Brepro` 标志——该标志要求 cl.exe 记录文件安全属性，在本工作区（带沙箱 ACL 标签）会触发 `error D8050: 无法执行 c1.dll`。
 
-不使用脚本时的等价命令（VS 安装路径按实际填写，或先 `set VCVARS=...` 供脚本自动探测）：
+临时目录 `TMP` 和 `TEMP` 也会指向项目内的 `.tmp`，避免系统临时目录权限影响构建。
+
+只需要直接验证 Tauri 构建时，可在配置好 MSVC 后运行以下命令。它不执行完整的签名配置、清单生成和便携 ZIP 整理；正式发布请使用 `build-win.bat`：
 
 ```bat
 set PATH=%USERPROFILE%\.cargo\bin;%PATH%
@@ -68,9 +91,9 @@ npm run tauri build
 
 ```bash
 npm test                                        # Vitest 前端单元测试
-cargo test --release                            # Rust 侧测试（同步引擎等）
+cargo test --release --manifest-path src-tauri/Cargo.toml   # Rust 侧测试
 node scripts/webdav-test-server.mjs <目录>       # 本地联测用迷你 WebDAV 服务器
-cargo test --release webdav::tests::live_sync -- --include-ignored   # WebDAV 端到端联测（需先起上面的服务器）
+cargo test --release --manifest-path src-tauri/Cargo.toml webdav::tests::live_sync -- --include-ignored   # WebDAV 端到端联测
 ```
 
 完整测试用例清单（自动化 + 手工验收）见 [docs/测试用例.md](docs/测试用例.md)。

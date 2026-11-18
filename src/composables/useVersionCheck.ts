@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
-import { check } from '@tauri-apps/plugin-updater'
+import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import i18n from '../i18n'
 import packageJson from '../../package.json'
@@ -28,16 +28,29 @@ const checkError = ref<string | null>(null)
 type DownloadState = 'idle' | 'checking' | 'downloading' | 'installing' | 'done' | 'error'
 const downloadState = ref<DownloadState>('idle')
 const downloadProgress = ref(0)
+let pendingUpdate: Update | null = null
+const isBusy = () => ['checking', 'downloading', 'installing'].includes(downloadState.value)
+
+async function clearPendingUpdate() {
+  const previous = pendingUpdate
+  pendingUpdate = null
+  updateAvailable.value = false
+  latestVersion.value = null
+  if (previous) await previous.close().catch(console.warn)
+}
 
 // 检查更新
 async function checkForUpdates(): Promise<boolean> {
+  if (isBusy()) return false
   downloadState.value = 'checking'
   checkError.value = null
   updateAvailable.value = false
 
   try {
-    const update = await check()
+    await clearPendingUpdate()
+    const update = await check({ timeout: 20000 })
     if (update) {
+      pendingUpdate = update
       latestVersion.value = update.version
       updateAvailable.value = true
       downloadState.value = 'idle'
@@ -54,22 +67,25 @@ async function checkForUpdates(): Promise<boolean> {
 }
 
 // 下载并安装更新
-async function downloadAndInstall(): Promise<void> {
+async function downloadAndInstall(beforeInstall?: () => Promise<void>): Promise<void> {
+  if (isBusy()) return
   let contentLength = 0
   let downloaded = 0
 
   downloadState.value = 'downloading'
   downloadProgress.value = 0
+  checkError.value = null
 
   try {
-    const update = await check()
+    // Install the exact version offered to the user, even if a new release appears meanwhile.
+    const update = pendingUpdate
     if (!update) {
       checkError.value = i18n.global.t('version.noUpdate')
       downloadState.value = 'error'
       return
     }
 
-    await update.downloadAndInstall((event) => {
+    await update.download((event) => {
       switch (event.event) {
         case 'Started':
           contentLength = event.data.contentLength ?? 0
@@ -78,16 +94,21 @@ async function downloadAndInstall(): Promise<void> {
         case 'Progress':
           downloaded += event.data.chunkLength
           if (contentLength > 0) {
-            downloadProgress.value = Math.round(
+            downloadProgress.value = Math.min(100, Math.round(
               (downloaded / contentLength) * 100
-            )
+            ))
           }
           break
         case 'Finished':
-          downloadState.value = 'installing'
+          downloadProgress.value = 100
           break
       }
-    })
+    }, { timeout: 120000 })
+
+    // Windows exits inside install(); flush pending notes before handing control to NSIS.
+    downloadState.value = 'installing'
+    await beforeInstall?.()
+    await update.install()
 
     downloadState.value = 'done'
     await relaunch()
@@ -95,6 +116,7 @@ async function downloadAndInstall(): Promise<void> {
     console.error('Update download/install failed:', error)
     checkError.value = i18n.global.t('version.downloadError')
     downloadState.value = 'error'
+    await clearPendingUpdate()
   }
 }
 

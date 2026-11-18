@@ -212,6 +212,7 @@ export default {
   'settings.about': '关于',
   'settings.currentVersion': '当前版本',
   'settings.checkUpdate': '检查更新',
+  'settings.updateChecking': '检查中…',
   'settings.updateAvailable': '发现新版本 v{version}',
   'settings.download': '下载更新',
   'settings.installUpdate': '安装更新',
@@ -661,7 +662,7 @@ export default {
   'version.parseError': '无法解析版本信息',
   'version.networkError': '网络错误，请检查网络连接',
   'version.noUpdate': '未检测到更新',
-  'version.downloadError': '下载失败，请稍后重试',
+  'version.downloadError': '更新失败，请重新检查更新后重试，或前往 GitHub Releases 下载安装包',
 
   'common.confirm': '确定',
   'common.cancel': '取消',

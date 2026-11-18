@@ -1,100 +1,74 @@
-# MaikNote 官网（site/）
+﻿# MaikNote for Windows 展示站
 
-独立的产品展示站，与应用源码完全解耦：纯静态 HTML + CSS + JS，**零构建、零依赖、无第三方 CDN**，
-双击 `index.html` 或丢到任意静态托管即可访问。
+这是本仓库 Windows 移植版的静态展示页面，使用 HTML、CSS 和原生 JavaScript，无需 npm 构建。应用原项目为 [Aprilming/maiknote](https://github.com/Aprilming/maiknote)，原作者 [Aprilming](https://github.com/Aprilming)；Windows 移植与二次开发者为 sansui（[gitee.com/wyq517](https://gitee.com/wyq517)）。本仓库维护与发布：[1578393930/MaikNote-for-Windows](https://github.com/1578393930/MaikNote-for-Windows)。
 
 ## 目录
 
-```
+```text
 site/
-├── index.html                 # 单页：Hero / 功能 / 截图 / AI / 快捷键 / 下载 / FAQ
+├── index.html                  # 功能、截图、快捷键、Windows 下载与来源署名
 ├── assets/
-│   ├── styles.css             # 设计令牌 + 深/浅主题
-│   ├── main.js                # 主题切换、复制命令、最新版本解析
-│   └── img/                   # 产品截图、AI 演示 GIF、应用图标
-└── README.md
+│   ├── styles.css              # 样式与深浅主题
+│   ├── main.js                 # 主题切换、版本查询和下载链接
+│   └── img/                    # 原项目截图、演示和应用图标
+├── deploy/nginx.conf.template  # 容器 Nginx 配置
+├── Dockerfile
+└── docker-compose.yml
 ```
 
 ## 本地预览
 
-```bash
-cd site && python3 -m http.server 4173
-# 打开 http://127.0.0.1:4173
+在项目根目录运行：
+
+```powershell
+python -m http.server 4173 --bind 127.0.0.1 --directory site
 ```
 
-直接 `open site/index.html` 也能看，只是浏览器会限制 `file://` 下的部分能力（如剪贴板 API 降级）。
+打开 <http://127.0.0.1:4173>。也可直接打开 `site/index.html`，但浏览器可能限制文件页面的存储或网络能力，推荐本地 HTTP 预览。
 
-## 部署
+## 部署范围
 
-### GitHub Pages（已配好流水线）
+静态托管时只上传 `site/index.html` 和 `site/assets/`，所有页面资源使用相对路径，支持子路径部署。不要上传项目根目录、密钥、环境配置、笔记、日志、临时目录或开发文档。
 
-`.github/workflows/pages.yml` 在 `site/` 有改动推送到 `main` 时自动发布。
-首次使用需在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
+本仓库目前没有 GitHub Pages 发布工作流。如需使用 Pages，应另行配置；此文档不代表网站已经部署。上游的 maiknote.91kfc.vip 是原版官网，不是本仓库的 Windows 展示站。
 
-### 任意静态托管
+### Docker 部署
 
-把 `site/` 目录整个上传到 Vercel / Netlify / Cloudflare Pages / 对象存储即可。
-所有资源都是相对路径（`assets/...`），挂在子路径下也能正常显示。
+在已安装 Docker Compose 的环境中，从 `site/` 目录执行：
 
-
-### 自有服务器 jpp（Docker + 宿主机 Nginx）
-
-线上实例：https://maiknote.91kfc.vip （容器 `maiknote-site` 监听 127.0.0.1:8099，宿主机 Nginx 反代 + 通配证书 `/etc/nginx/ssl/91.pem`）。
-
-```bash
-# 1. 本地上传（只传 site/ 目录，约 3MB）
-sftp/rsync -> /opt/maiknote-site
-
-# 2. 服务器上构建并启动（Rocky 9 + Docker 29）
-cd /opt/maiknote-site && docker build -t maiknote-site:latest .
-docker run -d --name maiknote-site --restart unless-stopped \
-  -p 127.0.0.1:8099:80 maiknote-site:latest
-
-# 3. 宿主机反代（/etc/nginx/conf.d/maiknote.conf）
-#    server_name maikdown.91kfc.vip maiknote.91kfc.vip;
-#    proxy_pass http://127.0.0.1:8099;
-nginx -t && systemctl reload nginx
-
-# 4. 更新内容（改完再跑一次，容器换新镜像）
-cd /opt/maiknote-site && docker build -t maiknote-site:latest . \
-  && docker restart maiknote-site
+```sh
+docker compose up -d --build
 ```
 
-- **端口**：容器内 80（`ENV PORT=80`），宿主机只绑 `127.0.0.1:8099`，不对公网暴露。
-- **证书**：沿用服务器上的通配证书 `*.91kfc.vip`，新增子域不需要重新签。
-- **DNS**：子域需在 Cloudflare 上有 A 记录指向 `216.23.81.140`（橙云可开）。`maiknote` 已有记录，`maikdown` 待加。
-- **验证**：`curl -s https://maiknote.91kfc.vip/healthz` 应返回 `ok`；`docker inspect --format '{{.State.Health.Status}}' maiknote-site` 为 `healthy`。
+默认访问 <http://127.0.0.1:8099>，健康检查地址为 `/healthz`。更新页面后再次运行上述命令以重新构建并替换容器。对外域名、HTTPS 和反向代理由部署者按自己的环境配置，无需沿用上游服务器、域名或证书。
 
-## 下载按钮怎么工作
+Docker 构建上下文只允许网页、静态资源、Nginx 模板和 Dockerfile；镜像中只复制运行网站所需内容。
 
-**全站只有一个下载区**（`#download`，两个架构卡片）。顶部 Hero 和底部 CTA 的「下载 macOS 版」只是锚点到 `#download`，不再重复放 DMG 按钮。
+## Windows 下载按钮
 
-`#download` 里的按钮默认指向 `https://github.com/Aprilming/maiknote/releases/latest`。
-页面加载后，`assets/main.js` 会请求 GitHub Releases API，按架构匹配最新产物并改写链接：
+下载区提供两种 Windows x64 包，初始链接均为：
 
-| 按钮 | 匹配规则 |
+<https://github.com/1578393930/MaikNote-for-Windows/releases/latest>
+
+`assets/main.js` 从本仓库 GitHub Releases API 读取最新正式版本，按当前版本的完整文件名定位附件：
+
+| 按钮 | 附件 |
 |:---|:---|
-| Apple Silicon | `*_aarch64.dmg`（兼容 `*arm64.dmg`） |
-| Intel | `*_x64.dmg`（兼容 `*x86_64.dmg`） |
+| 安装版 | `MaikNote_<版本>_x64-setup.exe` |
+| 便携版 | `MaikNote_<版本>_x64-portable.zip` |
 
-同时把页面上的 `<span data-version>` 更新为最新 tag。
-API 不可达 / 触发速率限制时静默回退到发布页，不报错、不空白。
+只接受本仓库对应 tag 下的附件 URL，不将 `.sig`、证明文件或上游 macOS 包作为下载目标。版本查询不可用或附件缺失时，按钮保留发布页链接。
 
-已缓存在 `sessionStorage` 的 `mn-release` 键里，同一次会话不重复请求；调试时清掉即可：
-`sessionStorage.removeItem('mn-release')`。
+版本号仅来自 API，不在 HTML 中写死。缓存键为 `mn-windows-release`，有效期为 10 分钟，不复用旧版站点的 macOS 缓存。调试时可执行 `sessionStorage.removeItem('mn-windows-release')` 清除缓存。
 
-## 改内容时看这里
+## 文案与署名规则
 
-- **版本号只来自 GitHub**：HTML 里**不写死任何版本号**。三处 `data-ver-wrap`（Hero 徽章、下载区标题、页脚）默认 `hidden`，`main.js` 拿到 `releases/latest` 的 `tag_name` 后写入 `[data-version]` 并取消隐藏；API 挂掉或受限时整段版本信息不显示，按钮回落到 `/releases/latest`。改文案搜 `data-ver-wrap`。
-- **截图**：均为 macOS 实机窗口截图（WebP，原生 2070×1356，不缩放，1x/2x 屏都不糊），`#shots` 里 `.shots-grid` 是八张卡片，首张 `.is-lead` 通栏。换图只改 `assets/img/` 下同名 `.webp`（保持 2070×1356）；新增截图复制一段 `<figure class="window shot-card">`（标题栏 `<span>` 写标签，`img` 带 `width="2070" height="1356"`）。
-- **比例锁死**：`.shot-card img` 上写了 `aspect-ratio: 2070 / 1356`，任何容器/缩放都不会把截图拉变形；换图若比例不是 2070:1356，同步改这个值。
-- **缓存**：`index.html` 引用 `assets/styles.css?v=`、`assets/main.js?v=`、`assets/img/*.webp?v=`。改样式或图后把 `?v=` 的数字 +1，避免用户看到旧缓存。
-- **快捷键表**：`#shortcuts` 里 `.key-row`，一条一个 `<div>`。
-- **主题**：默认跟随系统，右上角按钮可切换并记住选择（`localStorage.mn-theme`）。
-  配色全部在 `styles.css` 顶部的 CSS 变量里，改 `:root`（深色）与 `html[data-theme="light"]` 两处即可。
-- **配色对比度**：正文 muted 文本用 `--muted`，不要在小字上直接用 `--faint`。
+- 中文、英文 README 与网站保持一致：Windows x64、本地「文档」目录、自定义工作空间、WebDAV/OneDrive、Ctrl 快捷键、设置中手动检查更新。
+- 保留原仓库和 Aprilming 原作者链接，以及既有 Windows 移植者 sansui 的署名。页面的原项目、Windows 仓库和下载入口须清晰区分。
+- 当前截图和 AI 演示来自 macOS 原版，页面必须标注来源。更换为实际 Windows 截图后再更新说明，不把原版图片直接称为 Windows 实机截图。
+- macOS 安装、iCloud 路径、Apple 公证、双架构 DMG 和 Cmd 快捷键不作为 Windows 使用指引。
+- 运行环境需要 WebView2；便携版的数据仍放在工作空间。应用内更新使用安装器，保持便携使用时手动替换 ZIP 中的程序文件。
+- 使用与分发条件引用本仓库 [LICENSE](../LICENSE)，本次文案适配不修改许可条款。
+- 修改 JS 或 CSS 时递增 HTML 中对应的 `?v=` 缓存参数。主题通过 `localStorage.mn-theme` 保存。
 
-## 内容口径
-
-文案取自 `README.md`，改动功能描述时两边保持一致：中文站、版本号 `0.10.21`、macOS 12+、双架构 DMG、
-GPL-2.0 与「个人使用」授权说明。
+网站修改不等于发布新版应用。GitHub Release 标题和说明仍须按照 [发布规则](../docs/windows-release.md) 先取得维护者确认。

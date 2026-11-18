@@ -26,6 +26,7 @@ dist-ssr
 
 # Tauri updater signing keys
 keys/
+.tauri-signing.env
 
 # Windows build temp dirs (esbuild/NSIS download caches)
 .tmp
@@ -35,3 +36,60 @@ src-tauri/target
 
 # Portable release artifacts
 release-portable
+
+# Local secrets and credentials (keep only sanitized configuration examples)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.key
+*.pem
+*.p12
+*.pfx
+*.keystore
+credentials*.json
+secrets*.json
+service-account*.json
+/.aws/
+/.ssh/
+/.gnupg/
+/.codex/
+/gh-config/
+/.npmrc
+/.netrc
+/_netrc
+
+# Local logs, test reports, caches and backups
+build-log*.txt
+*-debug.txt
+coverage/
+playwright-report/
+test-results/
+.cache/
+*.tmp
+*.bak
+*.old
+*.dmp
+*.tsbuildinfo
+
+# Generated installers, archives and runtime data
+*.exe
+*.dll
+*.pdb
+*.msi
+*.msix
+*.zip
+*.7z
+*.tar.gz
+*.sig
+/latest.json
+/release-assets/
+/update-artifacts/
+/notes/
+/backups/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm

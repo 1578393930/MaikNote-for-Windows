@@ -1,12 +1,12 @@
 <div align="center">
   <h1>MaikNote for Windows</h1>
-  <p>一款 Windows 原生的 AI Markdown 悬浮便签应用</p>
+  <p>基于 MaikNote 移植与二次开发的 Windows AI Markdown 悬浮便签</p>
   <p>
     <img src="https://img.shields.io/badge/Platform-Windows-0078d4?style=flat-square&logo=windows" />
     <img src="https://img.shields.io/badge/Tauri-2.x-blue?style=flat-square" />
     <img src="https://img.shields.io/badge/Vue-3.x-42b883?style=flat-square&logo=vue.js" />
     <img src="https://img.shields.io/badge/WebDAV-同步-0071e3?style=flat-square" />
-    <img src="https://img.shields.io/badge/Version-0.10.21-green?style=flat-square" />
+    <img src="https://img.shields.io/github/v/release/1578393930/MaikNote-for-Windows?style=flat-square&label=Version" />
   </p>
 </div>
 
@@ -18,11 +18,14 @@
 
 ## 项目来源
 
+[下载 Windows 版](https://github.com/1578393930/MaikNote-for-Windows/releases/latest) · [English](README_EN.md) · [Windows 构建指南](README-WIN.md)
+
 > **本项目并非从零编写的作品，而是基于开源项目 [Aprilming/maiknote](https://github.com/Aprilming/maiknote)（macOS 原生版）迁移而来的二次开发版本。**
 >
 > - **原项目 / 原作者**：[Aprilming/maiknote](https://github.com/Aprilming/maiknote) · 作者 **[Aprilming](https://github.com/Aprilming)**（完全通过 vibe coding 方式开发，灵感来自 [Antinote](https://antinote.io/)）
-> - **本仓库所做的工作**：将 macOS 专属实现（iCloud 存储、毛玻璃、全局快捷键体系等）全部替换为 Windows 等价物，并在此基础上二次开发（新增 WebDAV 同步等功能、修复平台适配问题）
+> - **Windows 版所做的工作**：适配本地文档目录、Windows 窗口与快捷键，新增 WebDAV 同步，并修复平台适配问题；平台差异见 [README-WIN.md](README-WIN.md)
 > - **Windows 版维护者**：sansui · [gitee.com/wyq517](https://gitee.com/wyq517)
+> - **本仓库维护与发布**：[1578393930/MaikNote-for-Windows](https://github.com/1578393930/MaikNote-for-Windows)
 >
 > 本项目的核心架构、功能设计与绝大部分代码均来自原项目，功劳属于原作者 Aprilming。
 
@@ -36,7 +39,7 @@
 
 ## 主要界面
 
-> 以下截图来自 macOS 原版，Windows 版界面布局一致（窗口按钮在右上角）。
+> 以下截图和 AI 演示来自 Aprilming 的 macOS 原版，用于展示编辑与布局。Windows 版窗口按钮、快捷键及系统效果以实际运行界面为准。
 
 ![主界面](resources/demo1.webp)
 ![深色](resources/demo1-dark.webp)
@@ -106,14 +109,20 @@
 
 ## 下载与安装
 
+前往 [本仓库最新 Release](https://github.com/1578393930/MaikNote-for-Windows/releases/latest) 选择 **Windows x64** 文件。运行需要 WebView2 Runtime；未安装时请先安装该运行环境。
+
 - **安装版**：`MaikNote_<版本>_x64-setup.exe`（NSIS），双击安装
 - **便携版**：`MaikNote_<版本>_x64-portable.zip`，解压即用，数据仍写在 `文档\MaikNote`
 
-> 首次运行可能弹出 Windows SmartScreen 提示（应用未做代码签名）：点「更多信息」→「仍要运行」即可。文件本身未改动系统设置，可放心使用。
+> 首次运行可能遇到 Windows SmartScreen 提示。请先确认文件来自上述仓库且下载完整，再按系统提示操作。应用更新签名用于验证更新包，与 Windows 代码签名不同。
+
+**检查与安装更新** — 在「设置 → 关于」手动点击「检查更新」，发现更高版本后再点击下载并安装。更新包经 minisign 签名校验，指向本仓库 Releases；不会在启动时自动弹窗或后台安装。
+
+便携版若要保持解压即用，请手动下载新 ZIP 替换程序；应用内更新按钮使用安装器。维护者发布步骤见 [Windows 发布与更新](docs/windows-release.md)。
 
 ## 常见问题
 
-**SmartScreen 提示"已保护你的电脑"** — 应用未做代码签名（签名证书需按年付费）。点「更多信息」→「仍要运行」；便携版同理。
+**SmartScreen 提示"已保护你的电脑"** — 当前安装包未提供 Windows 代码签名。先核对下载来源与文件，再决定是否按系统提示继续运行；便携版同理。
 
 **双击 exe 提示 `PluginInitialization("http", "拒绝访问。")`** — 直接从压缩包里双击运行 exe 导致：先把**整个文件夹解压到本地磁盘**（不要在压缩软件里直接运行）再启动。
 
@@ -133,7 +142,7 @@ Tauri 2.x + Vue 3.x + TypeScript · Tiptap 2.x（Notion 风格块操作）· Pin
 
 ## 开发指南
 
-需要 Node.js 20+、Rust 1.85+（MSVC）、Visual Studio C++ 生成工具、WebView2 Runtime。
+需要 Node.js 22+、Rust 1.85+（MSVC）、Visual Studio C++ 生成工具、WebView2 Runtime。首次使用请先运行 `npm ci` 安装依赖。
 
 ```bat
 build-win.bat dev     REM 开发热重载
@@ -147,6 +156,7 @@ build-win.bat         REM 打包 NSIS 安装包 + 便携版 ZIP
 - **原项目 / 原作者**：[Aprilming/maiknote](https://github.com/Aprilming/maiknote) · 作者 **[Aprilming](https://github.com/Aprilming)** —— 本项目基于该开源 macOS 版迁移而来，核心架构、功能设计与绝大部分代码均出自原项目
 - **Windows 版迁移与二次开发**：sansui · [sansui@jun-mou.top](mailto:sansui@jun-mou.top) · [gitee.com/wyq517](https://gitee.com/wyq517) —— 平台移植（iCloud → 本地 / WebDAV、Cmd → Ctrl 快捷键体系等）、Bug 修复，以及 WebDAV 同步等新增功能
 - 原项目的灵感来源：[Antinote](https://antinote.io/)；原项目官网：[maiknote.91kfc.vip](https://maiknote.91kfc.vip)
+- 本仓库维护与发布：[1578393930/MaikNote-for-Windows](https://github.com/1578393930/MaikNote-for-Windows)
 
 ## 许可协议
 

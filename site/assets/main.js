@@ -1,7 +1,7 @@
-/* MaikNote site — vanilla JS, no dependencies. */
+/* MaikNote for Windows site — based on Aprilming/maiknote. */
 (() => {
-  const REPO = 'Aprilming/maiknote';
-  const RELEASE_PAGE = 'https://github.com/' + REPO + '/releases/latest';
+  const REPO = '1578393930/MaikNote-for-Windows';
+  const CACHE_KEY = 'mn-windows-release';
 
   /* ---------- theme ---------- */
   const root = document.documentElement;
@@ -55,8 +55,8 @@
     document.querySelectorAll('[data-ver-wrap]').forEach((el) => { el.hidden = false; });
   };
 
-  const applyAsset = (arch, url) => {
-    document.querySelectorAll('[data-download="' + arch + '"]').forEach((a) => {
+  const applyAsset = (kind, url) => {
+    document.querySelectorAll('[data-download="' + kind + '"]').forEach((a) => {
       a.href = url;
     });
   };
@@ -64,8 +64,8 @@
   const resolveRelease = async () => {
     let release = null;
     try {
-      const cached = sessionStorage.getItem('mn-release');
-      if (cached) release = JSON.parse(cached);
+      const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+      if (cached && Date.now() - cached.savedAt < 10 * 60 * 1000) release = cached.release;
     } catch { /* ignore bad cache */ }
 
     if (!release) {
@@ -75,19 +75,24 @@
         });
         if (res.ok) {
           release = await res.json();
-          sessionStorage.setItem('mn-release', JSON.stringify(release));
+          sessionStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), release }));
         }
       } catch { /* offline or rate limited: keep the release page links */ }
     }
 
-    if (!release || !Array.isArray(release.assets)) return;
+    if (!release || release.draft || release.prerelease || !Array.isArray(release.assets)) return;
+    const version = String(release.tag_name || '').replace(/^v/, '');
+    if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) return;
 
-    setVersion(String(release.tag_name || '').replace(/^v/, ''));
-    const find = (re) => release.assets.find((a) => re.test(a.name));
-    const arm = find(/aarch64\.dmg$/i) || find(/arm64\.dmg$/i);
-    const intel = find(/x64\.dmg$/i) || find(/x86_64\.dmg$/i);
-    if (arm) applyAsset('arm64', arm.browser_download_url);
-    if (intel) applyAsset('x64', intel.browser_download_url);
+    setVersion(version);
+    const applyWindowsAsset = (kind, suffix) => {
+      const name = `MaikNote_${version}_x64-${suffix}`;
+      const url = `https://github.com/${REPO}/releases/download/${release.tag_name}/${name}`;
+      const asset = release.assets.find((a) => a.name === name && a.browser_download_url === url);
+      if (asset) applyAsset(kind, url);
+    };
+    applyWindowsAsset('setup', 'setup.exe');
+    applyWindowsAsset('portable', 'portable.zip');
   };
 
   resolveRelease();

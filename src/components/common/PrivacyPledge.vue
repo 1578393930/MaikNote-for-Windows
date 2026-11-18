@@ -31,7 +31,7 @@ const pledgeKeys = [
 ] as const
 
 const authorEmail = 'sansui@jun-mou.top'
-const authorHome = 'https://gitee.com/wyq517'
+const authorHome = 'https://github.com/1578393930/MaikNote-for-Windows'
 const copied = ref(false)
 let copiedTimer: number | undefined
 

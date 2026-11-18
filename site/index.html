@@ -3,22 +3,21 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MaikNote — macOS 原生 AI Markdown 悬浮便签</title>
-<meta name="description" content="MaikNote 是一款 macOS 原生的 AI Markdown 悬浮便签：全局快捷键随叫随到，所见即所得写 Markdown，笔记以纯 .md 文件存在 iCloud，天然多设备同步，并内置 AI 改写与桌面笔记卡片。" />
-<meta property="og:title" content="MaikNote — macOS 原生 AI Markdown 悬浮便签" />
-<meta property="og:description" content="召之即来，挥之即去。全局快捷键唤起，所见即所得写 Markdown，AI 改写，桌面卡片，iCloud 纯文件同步。" />
+<title>MaikNote for Windows — AI Markdown 悬浮便签移植版</title>
+<meta name="description" content="基于 Aprilming/maiknote 移植与二次开发的 Windows 悬浮便签：Ctrl+Alt+A 随时唤起，所见即所得写 Markdown，本地文件存储、WebDAV 同步、AI 改写与桌面卡片，提供 Windows x64 安装版和便携版。" />
+<meta property="og:title" content="MaikNote for Windows — AI Markdown 悬浮便签移植版" />
+<meta property="og:description" content="源自 Aprilming 的 MaikNote，适配 Windows 本地存储、Ctrl 快捷键与 WebDAV 同步。下载 x64 安装版或便携版。" />
 <meta property="og:type" content="website" />
-<meta property="og:image" content="https://maiknote.91kfc.vip/assets/img/demo1.webp" />
 <link rel="icon" href="assets/img/icon-32.png" />
 <link rel="apple-touch-icon" href="assets/img/icon-128.png" />
-<link rel="stylesheet" href="assets/styles.css?v=4" />
+<link rel="stylesheet" href="assets/styles.css?v=5" />
 </head>
 <body>
 
 <header class="nav" id="nav">
   <a class="brand" href="#top">
     <img src="assets/img/icon-128.png" alt="MaikNote 图标" width="26" height="26" />
-    <span>MaikNote</span>
+    <span>MaikNote for Windows</span>
   </a>
   <nav class="nav-links">
     <a href="#features">功能</a>
@@ -41,24 +40,26 @@
   <section class="hero">
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="wrap hero-inner">
-      <p class="pill"><span class="dot"></span>macOS 12+<span data-ver-wrap hidden> · 版本 <span data-version></span></span> · GPL-2.0</p>
+      <p class="pill"><span class="dot"></span>Windows x64<span data-ver-wrap hidden> · 版本 <span data-version></span></span> · 移植与二次开发</p>
       <h1>随手一唤，<span class="grad">就在眼前</span></h1>
       <h2>从此，少一个打断思路的窗口!</h2>
       <p class="lede">
-        MaikNote 是一款 macOS 原生的悬浮便签。全局快捷键随叫随到，所见即所得地写 Markdown，
-        笔记就是 iCloud 里的一个个 <code>.md</code> 文件——多设备同步不需要任何账号体系。
+        MaikNote for Windows 是基于原版移植的悬浮便签。用 <kbd>Ctrl+Alt+A</kbd> 随时唤起，所见即所得地写 Markdown。
+        笔记保存为本地 <code>.md</code> 文件，可通过 WebDAV 或 OneDrive 文件夹同步。
       </p>
       <div class="cta">
         <a class="btn btn-primary" href="#download">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 19h14" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          下载 macOS 版
+          下载 Windows 版
         </a>
-        <a class="btn btn-ghost" href="https://github.com/Aprilming/maiknote" target="_blank" rel="noopener">GitHub 源码</a>
+        <a class="btn btn-ghost" href="https://github.com/1578393930/MaikNote-for-Windows" target="_blank" rel="noopener">Windows 源码</a>
       </div>
-      <p class="cta-note">免费 · 无需注册 · 数据仅留在本机与你的 iCloud</p>
+      <p class="cta-note">无需注册应用账号 · 本地 Markdown · 可选 WebDAV 同步</p>
+      <p class="cta-note">源自 <a href="https://github.com/Aprilming/maiknote" target="_blank" rel="noopener">Aprilming/maiknote</a>，原作者 <a href="https://github.com/Aprilming" target="_blank" rel="noopener">Aprilming</a> · <a href="#credits">移植与致谢</a></p>
 
       <figure class="window hero-shot">
-        <img src="assets/img/demo0.png" alt="MaikNote 主界面：悬浮便签与块菜单" width="2070" height="1356" loading="eager" />
+        <img src="assets/img/demo0.png" alt="原版 macOS MaikNote 界面参考：悬浮便签与块菜单" width="2070" height="1356" loading="eager" />
+        <figcaption>原版 macOS 界面参考，Windows 系统效果与快捷键以实际运行界面为准。</figcaption>
       </figure>
     </div>
   </section>
@@ -67,7 +68,7 @@
   <section class="wrap ideas">
     <div class="idea">
       <h3>召之即来，挥之即去</h3>
-      <p>一个全局快捷键（默认 <kbd>⌘⌥A</kbd>）唤起或隐藏，失焦自动收起，不占桌面、不留痕迹。</p>
+      <p>一个全局快捷键（默认 <kbd>Ctrl+Alt+A</kbd>）唤起或隐藏，可设置失焦隐藏、窗口置顶与开机自启。</p>
     </div>
     <div class="idea">
       <h3>所见即所得</h3>
@@ -85,19 +86,19 @@
     <h2>该有的都有，不该占地方的一点都不占</h2>
     <div class="grid">
       <article class="card wide">
-        <div class="card-icon">⌘</div>
+        <div class="card-icon">▤</div>
         <h3>悬浮窗与全局快捷键</h3>
-        <p>无边框透明窗口叠加原生毛玻璃，透明度、置顶、窗口层级可调；<strong class="hl">记住每个显示器与 Space 的位置</strong>，冷启动居中。可选开机自启，关闭窗口时隐藏到后台而不是退出。</p>
+        <p>Windows 无边框窗口与 Acrylic 毛玻璃效果，透明度、置顶可调；<strong class="hl">Ctrl 快捷键随时唤起</strong>。可选开机自启，关闭时隐藏或退出。</p>
       </article>
       <article class="card">
         <div class="card-icon">✎</div>
         <h3>Markdown风格编辑</h3>
-        <p><code>/</code> 斜杠命令、表格与待办清单、代码高亮与一键复制、颜色与字体样式、源码模式（<kbd>⌘/</kbd>）。</p>
+        <p><code>/</code> 斜杠命令、表格与待办清单、代码高亮与一键复制、颜色与字体样式、源码模式（<kbd>Ctrl+/</kbd>）。</p>
       </article>
       <article class="card">
         <div class="card-icon">▣</div>
         <h3>桌面笔记卡片</h3>
-        <p><kbd>⇧⌘D</kbd> 把笔记钉到桌面，可拖动缩放、直接勾选任务回写正文、一键复制；<strong class="hl">三档图层：最上层 / 普通 / 钉在桌面。</strong></p>
+        <p><kbd>Ctrl+Shift+D</kbd> 把笔记钉到桌面，可拖动缩放、勾选任务回写正文、一键复制；<strong class="hl">支持置顶、普通与底层显示</strong>，贴桌面效果按 Windows 窗口层级实现。</p>
       </article>
       <article class="card">
         <div class="card-icon">◫</div>
@@ -111,8 +112,8 @@
       </article>
       <article class="card">
         <div class="card-icon">☁</div>
-        <h3>纯文件 + iCloud</h3>
-        <p>笔记以「标题.md」真实文件存放在 iCloud 目录，文件名就是标题、文件夹就是目录，在 Finder 里能直接看见、编辑、备份。</p>
+        <h3>本地文件 + WebDAV</h3>
+        <p>笔记默认保存在系统「文档」下的 MaikNote 文件夹，可在资源管理器中编辑、备份。支持自定义工作空间、WebDAV 双向同步，或使用 OneDrive 管理的目录。</p>
       </article>
       <article class="card wide">
         <div class="card-icon">◎</div>
@@ -127,7 +128,7 @@
     <div class="wrap">
       <p class="eyebrow">SCREENSHOTS</p>
       <h2>看一眼就知道它长什么样</h2>
-      <p class="section-sub">全部为 macOS 实机截图，未做任何修饰。</p>
+      <p class="section-sub">以下素材来自 Aprilming 的 macOS 原版，用于展示编辑与布局。Windows 的窗口按钮、快捷键与系统效果有所不同。</p>
       <div class="shots-grid">
         <figure class="window shot-card">
           <div class="titlebar"><i></i><i></i><i></i><span>深色</span></div>
@@ -146,6 +147,7 @@
           <img src="assets/img/demo7.webp?v=2" alt="MaikNote 源码模式：原始 Markdown" width="2070" height="1356" loading="lazy" />
         </figure>
       </div>
+    </div>
   </section>
 
   <!-- AI -->
@@ -161,11 +163,11 @@
         <li>有选中：只把选中内容发给 AI，省 token 也更快</li>
         <li>无选中：把当前整篇笔记交给 AI 处理</li>
         <li>助手与提示词可自定义，接口地址随你换</li>
-        <li>内置 MCP 联网搜索与 <code>/ip</code> 等斜杠命令</li>
+        <li>支持联网搜索与 <code>/ip</code> 等斜杠命令</li>
       </ul>
     </div>
     <figure class="window gif-shot">
-      <div class="titlebar"><i></i><i></i><i></i><span>AI 改写演示</span></div>
+      <div class="titlebar"><i></i><i></i><i></i><span>原版 AI 改写演示</span></div>
       <img src="assets/img/xw_20260611145459.gif" alt="MaikNote AI 改写演示动图" width="720" loading="lazy" />
     </figure>
   </section>
@@ -174,22 +176,22 @@
   <section class="wrap section" id="shortcuts">
     <p class="eyebrow">SHORTCUTS</p>
     <h2>键盘才是最快的输入设备</h2>
-    <p class="section-sub">常用的九个快捷键可在「设置 → 快捷键」里改键、留空或恢复默认；搜索、设置、桌面钉与关闭窗口为固定组合。</p>
+    <p class="section-sub">以下为 Windows 默认键位。可配置项可在「设置 → 快捷键」里修改；边缘面板可单独设置快捷键，默认未绑定。</p>
     <div class="keys">
-      <div class="key-row"><span><kbd>⌘⌥A</kbd></span><span>唤起 / 隐藏主窗口（全局）</span></div>
-      <div class="key-row"><span><kbd>⇧⌥⌘A</kbd></span><span>窗口居中（全局）</span></div>
-      <div class="key-row"><span><kbd>⌘N</kbd></span><span>新建笔记</span></div>
-      <div class="key-row"><span><kbd>⇧⌘N</kbd></span><span>在当前笔记之前新建</span></div>
-      <div class="key-row"><span><kbd>⌘[</kbd> <kbd>⌘]</kbd></span><span>上一条 / 下一条笔记</span></div>
-      <div class="key-row"><span><kbd>⌘⌥[</kbd> <kbd>⌘⌥]</kbd></span><span>上一个 / 下一个目录</span></div>
-      <div class="key-row"><span><kbd>⌘F</kbd></span><span>搜索笔记</span></div>
-      <div class="key-row"><span><kbd>⌘⇧D</kbd></span><span>钉到桌面 / 从桌面移除</span></div>
-      <div class="key-row"><span><kbd>⌘/</kbd></span><span>切换源码模式</span></div>
-      <div class="key-row"><span><kbd>⌘\</kbd></span><span>展开 / 收起侧栏</span></div>
-      <div class="key-row"><span><kbd>⌘L</kbd></span><span>锁定 / 解锁笔记</span></div>
-      <div class="key-row"><span><kbd>⇧⌘P</kbd></span><span>窗口置顶</span></div>
-      <div class="key-row"><span><kbd>⌘,</kbd></span><span>打开设置</span></div>
-      <div class="key-row"><span><kbd>⌘W</kbd></span><span>隐藏窗口 / 退出（按设置）</span></div>
+      <div class="key-row"><span><kbd>Ctrl+Alt+A</kbd></span><span>唤起 / 隐藏主窗口（全局）</span></div>
+      <div class="key-row"><span><kbd>Ctrl+Alt+Shift+A</kbd></span><span>窗口居中（全局）</span></div>
+      <div class="key-row"><span><kbd>Ctrl+N</kbd></span><span>新建笔记</span></div>
+      <div class="key-row"><span><kbd>Ctrl+Shift+N</kbd></span><span>在当前笔记之前新建</span></div>
+      <div class="key-row"><span><kbd>Ctrl+[</kbd> <kbd>Ctrl+]</kbd></span><span>上一条 / 下一条笔记</span></div>
+      <div class="key-row"><span><kbd>Ctrl+Alt+[</kbd> <kbd>Ctrl+Alt+]</kbd></span><span>上一个 / 下一个目录</span></div>
+      <div class="key-row"><span><kbd>Ctrl+F</kbd></span><span>搜索笔记</span></div>
+      <div class="key-row"><span><kbd>Ctrl+Shift+D</kbd></span><span>钉到桌面 / 从桌面移除</span></div>
+      <div class="key-row"><span><kbd>Ctrl+/</kbd></span><span>切换源码模式</span></div>
+      <div class="key-row"><span><kbd>Ctrl+\</kbd></span><span>展开 / 收起侧栏</span></div>
+      <div class="key-row"><span><kbd>Ctrl+L</kbd></span><span>锁定 / 解锁笔记</span></div>
+      <div class="key-row"><span><kbd>Ctrl+Alt+P</kbd></span><span>窗口置顶</span></div>
+      <div class="key-row"><span><kbd>Ctrl+,</kbd></span><span>打开设置</span></div>
+      <div class="key-row"><span><kbd>Ctrl+Backspace</kbd></span><span>删除当前笔记</span></div>
     </div>
   </section>
 
@@ -198,43 +200,41 @@
     <div class="wrap">
       <p class="eyebrow">DOWNLOAD</p>
       <h2>安装包<span data-ver-wrap hidden> · <span data-version></span></span></h2>
-      <p class="section-sub">macOS 12 (Monterey) 及以上 · 双架构 DMG · 内置自动更新</p>
+      <p class="section-sub">Windows x64 · 安装版 / 便携版 · 运行需要 WebView2 Runtime</p>
       <div class="dl-grid">
         <article class="dl-card">
-          <h3>Apple Silicon</h3>
-          <p class="dl-arch">M1 / M2 / M3 / M4（aarch64）</p>
-          <a class="btn btn-primary btn-block" data-download="arm64" href="https://github.com/Aprilming/maiknote/releases/latest">下载 DMG</a>
+          <h3>Windows 安装版</h3>
+          <p class="dl-arch">x64 · NSIS 安装程序</p>
+          <a class="btn btn-primary btn-block" data-download="setup" href="https://github.com/1578393930/MaikNote-for-Windows/releases/latest">下载安装包 EXE</a>
         </article>
         <article class="dl-card">
-          <h3>Intel</h3>
-          <p class="dl-arch">x86_64 Mac（x64）</p>
-          <a class="btn btn-block" data-download="x64" href="https://github.com/Aprilming/maiknote/releases/latest">下载 DMG</a>
+          <h3>Windows 便携版</h3>
+          <p class="dl-arch">x64 · 解压后运行 MaikNote.exe</p>
+          <a class="btn btn-block" data-download="portable" href="https://github.com/1578393930/MaikNote-for-Windows/releases/latest">下载便携 ZIP</a>
         </article>
       </div>
       <p class="dl-fallback">
-        下载地址指向 <a href="https://github.com/Aprilming/maiknote/releases" target="_blank" rel="noopener">GitHub Releases</a>
-        的最新版本；若按钮未自动定位到对应架构，请在发布页手动选择 <code>*_aarch64.dmg</code> 或 <code>*_x64.dmg</code>。
+        下载地址指向 <a href="https://github.com/1578393930/MaikNote-for-Windows/releases" target="_blank" rel="noopener">本仓库 GitHub Releases</a>
+        的最新版本；网络不可用或按钮未定位文件时，可在发布页选择 <code>*_x64-setup.exe</code> 或 <code>*_x64-portable.zip</code>。
       </p>
 
       <div class="install">
-        <h3>首次打开被系统拦下？</h3>
-        <p>应用未做 Apple 公证，首次启动若提示「无法打开」，在终端执行一次即可解除隔离：</p>
-        <div class="code">
-          <code id="quarantineCmd">sudo xattr -r -d com.apple.quarantine /Applications/MaikNote.app/</code>
-          <button class="copy-btn" data-copy="#quarantineCmd">复制</button>
-        </div>
-        <p class="hint">还有一步：设置 → 隐私与安全性 → 完全磁盘访问，勾选 MaikNote，否则其他的AI Agent 无法在 Finder 里看到 iCloud 里的笔记文件。</p>
+        <h3>首次运行与更新</h3>
+        <p>安装版双击 EXE 安装；便携版请先完整解压，再启动 MaikNote.exe。若缺少 WebView2 Runtime，请先安装微软提供的运行环境。</p>
+        <p class="hint">当前程序未提供 Windows 代码签名，SmartScreen 可能显示提示，请先核对下载来源。更新包另有签名用于完整性验证。</p>
+        <p>更新时进入「设置 → 关于 → 检查更新」，发现新版本后点击下载并安装。保持便携使用时，请退出后用新 ZIP 替换程序文件。</p>
       </div>
 
       <div class="install">
         <h3>你的笔记存在哪</h3>
         <p>纯 Markdown 文件，文件名就是标题，目录就是文件夹：</p>
-        <pre class="tree"><code>~/Library/Mobile Documents/com~apple~CloudDocs/MaikNote/
+        <pre class="tree"><code>%USERPROFILE%\Documents\MaikNote\
 ├── metadata.json        # 索引：收藏、锁定、回收站、排序
 ├── assistants.json      # AI 助手配置
 ├── 灵感.md
 └── 工作/
     └── 周报.md</code></pre>
+        <p class="hint">实际路径跟随 Windows 的系统「文档」目录，可在「设置 → 工作空间」添加其他目录。便携版也在工作空间中保存数据，不默认写入程序文件夹。</p>
       </div>
     </div>
   </section>
@@ -246,11 +246,11 @@
     <div class="faq">
       <details open>
         <summary>需要注册账号吗？能多设备同步吗？</summary>
-        <p>不需要。笔记本身就是 iCloud 云盘里的 Markdown 文件，只要各台 Mac 登录同一个 Apple ID 并开启 iCloud 云盘，就自动同步。</p>
+        <p>不需要注册应用账号。笔记默认存放在本地；多设备可在设置中配置 WebDAV（坚果云需使用应用密码），或将工作空间放进 OneDrive 文件夹。同步服务需要你自己的账号与配置。</p>
       </details>
       <details>
-        <summary>支持哪些 macOS 版本与机型？</summary>
-        <p>macOS 12 Monterey 及以上，Apple Silicon 与 Intel 都提供 DMG 安装包。体积小、启动快，不依赖 Electron 运行时。</p>
+        <summary>支持什么平台？macOS 版在哪里？</summary>
+        <p>本仓库提供 Windows x64 安装版与便携版，运行依赖 WebView2 Runtime。macOS 原版由 <a href="https://github.com/Aprilming/maiknote" target="_blank" rel="noopener">Aprilming/maiknote</a> 提供；两个项目的安装包和更新入口不同。</p>
       </details>
       <details>
         <summary>AI 功能会把我的笔记传到别人那里吗？</summary>
@@ -258,9 +258,17 @@
       </details>
       <details>
         <summary>怎么升级？</summary>
-        <p>应用内置 Tauri 自动更新，检测到新版本会提示下载安装；也可以在 GitHub Releases 手动下载覆盖安装。</p>
+        <p>在「设置 → 关于」手动点击「检查更新」，发现更高版本后再点击下载并安装；不会在启动时自动弹窗或后台安装。也可以从本仓库 Releases 手动下载新版。</p>
       </details>
     </div>
+  </section>
+  <section class="wrap section" id="credits">
+    <p class="eyebrow">ORIGIN &amp; CREDITS</p>
+    <h2>项目来源与开发者</h2>
+    <p>本项目基于 <a href="https://github.com/Aprilming/maiknote" target="_blank" rel="noopener">Aprilming/maiknote</a> 移植与二次开发。原作者为 <a href="https://github.com/Aprilming" target="_blank" rel="noopener">Aprilming</a>，核心架构、编辑器与主要功能设计来自原项目。</p>
+    <p>Windows 移植与二次开发：sansui · <a href="https://gitee.com/wyq517" target="_blank" rel="noopener">gitee.com/wyq517</a>。本仓库维护与发布：<a href="https://github.com/1578393930/MaikNote-for-Windows" target="_blank" rel="noopener">1578393930/MaikNote-for-Windows</a>。</p>
+    <p>Windows 版适配本地文件存储、Ctrl 快捷键、窗口与桌面行为，并提供 WebDAV 同步。上游官网：<a href="https://maiknote.91kfc.vip" target="_blank" rel="noopener">maiknote.91kfc.vip</a>；原项目灵感来自 <a href="https://antinote.io/" target="_blank" rel="noopener">Antinote</a>。</p>
+    <p>使用与分发条件请阅读本仓库 <a href="https://github.com/1578393930/MaikNote-for-Windows/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a>；分享时请保留原作者、Windows 移植者署名及原项目链接。</p>
   </section>
 </main>
 
@@ -269,23 +277,24 @@
     <div class="footer-brand">
       <img src="assets/img/icon-128.png" alt="" width="22" height="22" />
       <div>
-        <strong>MaikNote</strong>
-        <p>macOS 原生 AI Markdown 悬浮便签<span data-ver-wrap hidden> · 版本 <span data-version></span></span></p>
+        <strong>MaikNote for Windows</strong>
+        <p>Windows AI Markdown 悬浮便签移植版<span data-ver-wrap hidden> · 版本 <span data-version></span></span></p>
       </div>
     </div>
     <nav class="footer-links">
-      <a href="https://github.com/Aprilming/maiknote" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://github.com/Aprilming/maiknote/releases" target="_blank" rel="noopener">更新日志</a>
+      <a href="https://github.com/1578393930/MaikNote-for-Windows" target="_blank" rel="noopener">Windows 仓库</a>
+      <a href="https://github.com/1578393930/MaikNote-for-Windows/releases" target="_blank" rel="noopener">更新日志</a>
+      <a href="#credits">原项目与开发者</a>
       <a href="#download">下载</a>
       <a href="#faq">常见问题</a>
     </nav>
   </div>
   <div class="wrap footer-fine">
-    <p>© 2025–2026 MaikNote · GPL-2.0 · 按「原样」提供，不提供任何明示或暗示的保证。</p>
-    <p>本站为静态页面，无跟踪脚本、无第三方 CDN。</p>
+    <p>© 2025–2026 MaikNote · 原作者 Aprilming · Windows 移植 sansui · 使用条件见 LICENSE。</p>
+    <p>静态页面，无跟踪脚本；查询版本时会访问 GitHub Releases API。</p>
   </div>
 </footer>
 
-<script src="assets/main.js?v=4" defer></script>
+<script src="assets/main.js?v=5" defer></script>
 </body>
 </html>

@@ -27,10 +27,19 @@ function normalizeVersion(version) {
 const version = normalizeVersion(
   process.env.APP_VERSION || process.argv[2] || readJson(path.join(rootDir, 'version.json')).version
 );
+if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+  throw new Error('Expected a stable version such as 0.10.22');
+}
+writeJson(path.join(rootDir, 'version.json'), { version });
 
 const pkg = readJson(path.join(rootDir, 'package.json'));
 pkg.version = version;
 writeJson(path.join(rootDir, 'package.json'), pkg);
+
+const lock = readJson(path.join(rootDir, 'package-lock.json'));
+lock.version = version;
+lock.packages[''].version = version;
+writeJson(path.join(rootDir, 'package-lock.json'), lock);
 
 const tauriConf = readJson(path.join(rootDir, 'src-tauri/tauri.conf.json'));
 tauriConf.version = version;

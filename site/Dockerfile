@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# MaikNote 官网是纯静态站（无需 npm build），这里只做「拷贝 + Nginx 托管」。
+# MaikNote for Windows 展示站是纯静态页面，只复制网页运行所需资源。
 FROM nginx:1.27-alpine
 
 # 只拷真正需要发布的文件，避免把 Dockerfile / README 一起塞进 web 根目录

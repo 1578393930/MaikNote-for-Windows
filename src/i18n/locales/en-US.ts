@@ -212,6 +212,7 @@ export default {
   'settings.about': 'About',
   'settings.currentVersion': 'Current Version',
   'settings.checkUpdate': 'Check for Updates',
+  'settings.updateChecking': 'Checking…',
   'settings.updateAvailable': 'New version v{version} available',
   'settings.download': 'Update',
   'settings.installUpdate': 'Install Update',
@@ -661,7 +662,7 @@ export default {
   'version.parseError': 'Unable to parse version info',
   'version.networkError': 'Network error, please check your connection',
   'version.noUpdate': 'No updates available',
-  'version.downloadError': 'Download failed, please try again',
+  'version.downloadError': 'Update failed. Check for updates and retry, or download the installer from GitHub Releases.',
 
   'common.confirm': 'OK',
   'common.cancel': 'Cancel',

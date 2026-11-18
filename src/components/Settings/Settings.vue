@@ -7,6 +7,7 @@ import { useSettingStore, DEFAULT_IP_API_URL, normalizeIpApiUrl, DEFAULT_SHORTCU
 import { editorStylePresets } from '@/composables/editorStylePresets'
 import { useAssistantsStore, defaultAssistants, type Assistant } from '@/stores/assistantsStore'
 import { useVersionCheck } from '@/composables/useVersionCheck'
+import { useNoteStore } from '@/stores/noteStore'
 import { useDesktopNotes } from '@/composables/useDesktopNotes'
 import { useWebDavSync } from '@/composables/useWebDavSync'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -98,8 +99,48 @@ function showToast(message: string, duration = 2000) {
   setTimeout(() => toast.remove(), duration)
 }
 
-// Windows 版暂不启用在线更新，仅显示安装包的当前版本。
-const { currentVersion } = useVersionCheck()
+// 应用内自动更新：设置 → 关于 → 检查更新 / 安装更新
+const {
+  currentVersion,
+  latestVersion,
+  updateAvailable,
+  checkError,
+  downloadState,
+  downloadProgress,
+  checkForUpdates,
+  downloadAndInstall,
+} = useVersionCheck()
+const updateUpToDate = ref(false)
+
+const updateBusy = computed(
+  () => downloadState.value === 'checking' || downloadState.value === 'downloading' || downloadState.value === 'installing',
+)
+
+const updateButtonLabel = computed(() => {
+  if (downloadState.value === 'checking') return t('settings.updateChecking')
+  if (downloadState.value === 'downloading') return t('settings.downloading', { progress: downloadProgress.value })
+  if (downloadState.value === 'installing') return t('settings.installUpdate')
+  if (updateAvailable.value) return t('settings.updateAvailable', { version: latestVersion.value ?? '' })
+  return t('settings.checkUpdate')
+})
+
+const updateMessage = computed(() => {
+  if (checkError.value) return checkError.value
+  if (updateUpToDate.value && !updateAvailable.value) return t('version.noUpdate')
+  return ''
+})
+
+async function onUpdateAction() {
+  if (updateBusy.value) return
+  if (updateAvailable.value) {
+    await downloadAndInstall(() => useNoteStore().flushPendingSave())
+    return
+  }
+  updateUpToDate.value = false
+  const found = await checkForUpdates()
+  if (!found && !checkError.value) updateUpToDate.value = true
+}
+
 // IP 助手：查询地址在通用设置里可改（空值/非法值回落到 DEFAULT_IP_API_URL），项目地址是自建部署镜像
 const ipProjectUrl = 'https://hub.docker.com/r/aprilming/ipip'
 
@@ -2198,6 +2239,21 @@ async function handleSkillUnlink(target: SkillTargetInfo) {
               <span class="version-label">{{ $t('settings.currentVersion') }}</span>
               <span class="version-number">v{{ currentVersion }}</span>
             </div>
+            <div class="update-row">
+              <button
+                class="update-btn"
+                type="button"
+                :disabled="updateBusy"
+                @click="onUpdateAction"
+              >
+                <i class="i-mdi-cloud-download-outline"></i>
+                <span>{{ updateButtonLabel }}</span>
+              </button>
+              <span v-if="updateMessage" class="update-msg">{{ updateMessage }}</span>
+            </div>
+            <div v-if="downloadState === 'downloading'" class="update-progress">
+              <div class="update-progress-bar" :style="{ width: downloadProgress + '%' }"></div>
+            </div>
           </div>
 
           <div class="setting-item links-item">
@@ -3983,6 +4039,58 @@ async function handleSkillUnlink(target: SkillTargetInfo) {
 }
 
 /* ============ 版本 / 更新 ============ */
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-primary, #3b82f6);
+  background: transparent;
+  color: var(--color-primary, #3b82f6);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.update-btn:hover:not(:disabled) {
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+}
+
+.update-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.update-msg {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.update-progress {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-primary, #3b82f6);
+  transition: width 0.2s ease;
+}
+
 .version-item {
   flex-direction: row;
   align-items: center;
