@@ -29,7 +29,7 @@ The Windows adaptation covers storage, window behavior, Ctrl shortcuts, WebDAV s
 
 Open the [latest Windows release](https://github.com/1578393930/MaikNote-for-Windows/releases/latest). Current packages target **Windows x64** and require the Microsoft Edge WebView2 Runtime.
 
-- **Installer:** `MaikNote_<version>_x64-setup.exe` — run it to install.
+- **Installer:** `MaikNote_<version>_x64-setup.exe` — right-click the installer, choose **Run as administrator**, then follow the prompts. Administrator approval is required for installation; the app does not need to run as administrator afterward.
 - **Portable:** `MaikNote_<version>_x64-portable.zip` — extract the archive, then run `MaikNote.exe`. Notes still live in your Documents folder or configured workspace.
 
 The app does not currently provide Windows code signing. If SmartScreen displays a warning, verify the download source before deciding whether to continue. Updater signatures serve a different purpose: they verify update packages.

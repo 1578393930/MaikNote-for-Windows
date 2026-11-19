@@ -122,7 +122,7 @@ export function buildPreview(content: string): string {
 }
 
 /** 主窗口侧：把收藏笔记同步给边缘面板，并处理卡片点击 */
-export function useEdgePanel() {
+export function useEdgePanel(showEditor: () => void) {
   const noteStore = useNoteStore()
   const settingStore = useSettingStore()
   const directoryStore = useDirectoryStore()
@@ -220,8 +220,8 @@ export function useEdgePanel() {
     }, 1500)
   }
 
-  async function openFromEdge(id: string) {
-    const note = noteStore.notes.find(n => n.id === id)
+  async function openInMain(id: string) {
+    const note = noteStore.activeNotes.find(n => n.id === id)
     if (!note) return
     suppressMainAutoHide(1200)
     const dirId = note.directoryId ?? null
@@ -230,6 +230,7 @@ export function useEdgePanel() {
       directoryStore.selectDirectory(dirId)
     }
     noteStore.selectNote(id)
+    showEditor()
     await appWindow.show().catch(() => {})
     await appWindow.setFocus().catch(() => {})
   }
@@ -276,8 +277,9 @@ export function useEdgePanel() {
       await listen('maiknote:edge-ack', () => {
         lastEdgeAckAt = Date.now()
       }),
-      await listen<{ id: string }>(OPEN_EVENT, e => {
-        void openFromEdge(e.payload.id)
+      // 收藏面板和桌面便签共用这个入口，payload 都是笔记 ID。
+      await listen<string>(OPEN_EVENT, e => {
+        void openInMain(e.payload)
       }),
       await listen<boolean>('maiknote:edge-pinned', e => {
         edgePinned = e.payload === true

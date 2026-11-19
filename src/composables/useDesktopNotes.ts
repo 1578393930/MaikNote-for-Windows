@@ -264,10 +264,6 @@ function createDesktopNotes() {
         if (note.content === payload.content) return
         noteStore.updateNote(payload.id, { content: payload.content })
       }),
-      // Rust 侧「打开这篇」（desktop_note_open_in_main）
-      await listen<string>('maiknote:open-note', event => {
-        if (event.payload) void noteStore.selectNote(event.payload)
-      }),
     )
 
     stopWatch = watch(signature, () => schedulePush())

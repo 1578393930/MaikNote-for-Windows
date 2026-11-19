@@ -1805,9 +1805,8 @@ static EDGE_PINNED: AtomicBool = AtomicBool::new(false);
 static EDGE_CURRENT_WIDTH: Mutex<f64> = Mutex::new(EDGE_STRIP_WIDTH_DEFAULT + EDGE_STRIP_PADDING);
 /// 上次实际下发的窗口几何 (x, y, w, h)：完全相同时不再重复设置，避免窗口反复重排导致闪烁
 static EDGE_LAST_GEOM: Mutex<Option<(i32, i32, u32, u32)>> = Mutex::new(None);
-/// 主动收起后的静默期（毫秒时间戳）：期间一律视为「不展开」，
-/// 防止收起动画结束时鼠标恰好压在最右侧细条上，把面板又弹开
-static EDGE_SUPPRESS_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// 手动收起后，在光标离开触发区前保持收起，避免关闭按钮位于屏幕边缘时立即重开
+static EDGE_DISMISSED_UNTIL_EXIT: AtomicBool = AtomicBool::new(false);
 /// 快捷键当前是否处于按下状态：长按产生的重复 Pressed 事件不再翻转面板
 static EDGE_HOTKEY_DOWN: AtomicBool = AtomicBool::new(false);
 /// 上次快捷键切换的时间戳（毫秒），用于吞掉同一次按键的重复事件
@@ -1857,6 +1856,14 @@ fn edge_cursor_location(app: &AppHandle) -> Option<(f64, f64)> {
     }
 }
 
+fn edge_dismissed_until_exit(dismissed: &AtomicBool, inside: bool) -> bool {
+    if !inside {
+        dismissed.store(false, Ordering::SeqCst);
+        return false;
+    }
+    dismissed.load(Ordering::SeqCst)
+}
+
 /// 系统级热区轮询：不依赖网页的 mouseenter 事件，鼠标靠近屏幕右边缘就直接展开
 fn start_edge_hover_tracker(app: AppHandle) {
     if EDGE_TRACKER_STARTED.swap(true, Ordering::SeqCst) {
@@ -1885,11 +1892,7 @@ fn start_edge_hover_tracker(app: AppHandle) {
                 }
             }
             // 钉住时始终视为「需要展开」，鼠标移开也不收起
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let suppressed = now_ms < EDGE_SUPPRESS_UNTIL.load(Ordering::SeqCst);
+            let suppressed = edge_dismissed_until_exit(&EDGE_DISMISSED_UNTIL_EXIT, inside);
             let effective = if suppressed {
                 false
             } else {
@@ -2228,6 +2231,7 @@ fn set_edge_prefs(
                 EDGE_VISIBLE.store(false, Ordering::Relaxed);
                 EDGE_HOVERED.store(false, Ordering::Relaxed);
                 EDGE_PINNED.store(false, Ordering::Relaxed);
+                EDGE_DISMISSED_UNTIL_EXIT.store(false, Ordering::SeqCst);
                 let _ = win.hide();
                 return;
             }
@@ -2268,6 +2272,7 @@ fn hide_edge_window(app: AppHandle) -> Result<(), String> {
         EDGE_VISIBLE.store(false, Ordering::Relaxed);
         EDGE_HOVERED.store(false, Ordering::Relaxed);
         EDGE_PINNED.store(false, Ordering::Relaxed);
+        EDGE_DISMISSED_UNTIL_EXIT.store(false, Ordering::SeqCst);
         if let Some(win) = handle.get_webview_window("edge") {
             let _ = win.hide();
         }
@@ -2293,6 +2298,7 @@ fn toggle_edge_panel_impl(app: &AppHandle) {
     let pinned = !EDGE_PINNED.load(Ordering::Relaxed);
     EDGE_PINNED.store(pinned, Ordering::Relaxed);
     if pinned {
+        EDGE_DISMISSED_UNTIL_EXIT.store(false, Ordering::SeqCst);
         EDGE_VISIBLE.store(true, Ordering::Relaxed);
     }
     let handle = app.clone();
@@ -2331,11 +2337,7 @@ fn toggle_edge_panel(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn collapse_edge_panel(app: AppHandle) -> Result<(), String> {
     EDGE_PINNED.store(false, Ordering::Relaxed);
-    let until = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64 + 700)
-        .unwrap_or(0);
-    EDGE_SUPPRESS_UNTIL.store(until, Ordering::SeqCst);
+    EDGE_DISMISSED_UNTIL_EXIT.store(true, Ordering::SeqCst);
     let handle = app.clone();
     app.run_on_main_thread(move || {
         EDGE_HOVERED.store(false, Ordering::Relaxed);
@@ -2793,6 +2795,14 @@ mod edge_layout_tests {
 
     /// 1920×1080 屏，菜单栏 25px，工作区 (0,25,1920,1055)
     const WORK: (i32, i32, i32, i32) = (0, 25, 1920, 1055);
+
+    #[test]
+    fn manual_dismissal_waits_for_cursor_to_leave_trigger_zone() {
+        let dismissed = AtomicBool::new(true);
+        assert!(edge_dismissed_until_exit(&dismissed, true));
+        assert!(!edge_dismissed_until_exit(&dismissed, false));
+        assert!(!edge_dismissed_until_exit(&dismissed, true));
+    }
 
     #[test]
     fn right_side_sticks_to_right_edge() {

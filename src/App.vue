@@ -39,7 +39,6 @@ useShortcuts(openSettings)
 useGlobalShortcut()
 const { currentTheme } = useTheme() // 初始化主题系统，currentTheme 供笔记底色做明暗适配
 useEditorStyle() // 初始化编辑器样式预设
-useEdgePanel() // 把收藏笔记同步到屏幕边缘面板
 const webDavSync = useWebDavSync() // WebDAV 同步调度
 const { locale } = useI18n()
 
@@ -61,6 +60,7 @@ watch(() => settingStore.settings.trayIconEnabled, (enabled) => {
 
 // 当前页面：'editor' | 'settings' | 'search'
 const currentView = ref<'editor' | 'settings' | 'search'>('editor')
+useEdgePanel(closeSearchPage) // 同步收藏面板，并在打开笔记时回到编辑器
 // 左侧文件树（侧边栏）显示状态与宽度，持久化到 localStorage
 const sidebarVisible = ref(localStorage.getItem('sidebar.visible') !== 'false')
 const sidebarWidth = ref(clampSidebarWidth(Number(localStorage.getItem('sidebar.width')) || 216))

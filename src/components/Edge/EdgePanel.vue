@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { emit, emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
 import { useSettingStore } from '@/stores/settingStore'
 import type { EdgeNotePayload } from '@/composables/useEdgePanel'
@@ -136,7 +136,7 @@ async function hidePanel() {
 }
 
 function openNote(note: EdgeNotePayload) {
-  void emit('maiknote:open-note', { id: note.id })
+  void emitTo('main', 'maiknote:open-note', note.id)
   collapse(0)
 }
 

@@ -111,7 +111,7 @@
 
 前往 [本仓库最新 Release](https://github.com/1578393930/MaikNote-for-Windows/releases/latest) 选择 **Windows x64** 文件。运行需要 WebView2 Runtime；未安装时请先安装该运行环境。
 
-- **安装版**：`MaikNote_<版本>_x64-setup.exe`（NSIS），双击安装
+- **安装版**：`MaikNote_<版本>_x64-setup.exe`（NSIS），右键安装程序，选择「以管理员身份运行」，按提示完成安装。安装时需要管理员授权；安装后日常运行不需要管理员权限。
 - **便携版**：`MaikNote_<版本>_x64-portable.zip`，解压即用，数据仍写在 `文档\MaikNote`
 
 > 首次运行可能遇到 Windows SmartScreen 提示。请先确认文件来自上述仓库且下载完整，再按系统提示操作。应用更新签名用于验证更新包，与 Windows 代码签名不同。
