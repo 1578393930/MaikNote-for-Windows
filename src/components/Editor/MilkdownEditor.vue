@@ -447,7 +447,7 @@ watch(() => noteStore.filterDirectoryId, (newId, oldId) => {
 // update local content when current note changes
 watch(
   () => currentNote.value?.id,
-  async (newId, oldId) => {
+  () => {
     // 目录切换方向（up/down）：由组件根据目录位置推断并覆盖 store 方向
     if (pendingDirChange) {
       noteStore.navDirection = pendingDirChange
@@ -456,17 +456,6 @@ watch(
     // 其余导航（上一页/下一页/新建/删除）方向已由 store 的导航函数显式设置，
     // 模板直接绑定 noteStore.navDirection，无需在此推断（避免 watch 合并/跳过导致方向残留）
 
-    // 如果是从源码模式切换笔记，需要先同步保存当前笔记的编辑内容
-    if (isSourceMode.value && oldId && newId !== oldId) {
-      // 确保 textarea 的内容完全同步到 localContent
-      if (sourceTextareaRef.value) {
-        // 手动同步 textarea 的值到 localContent
-        localContent.value = sourceTextareaRef.value.value
-      }
-      // 直接落盘同步保存，不依赖防抖机制
-      noteStore.updateNote(oldId, { content: localContent.value })
-      await noteStore.persistNoteNow(oldId)
-    }
     localContent.value = currentNote.value?.content || ''
     // 切换笔记时保持源码模式状态，不强制重置
     // isSourceMode.value = false
@@ -497,17 +486,21 @@ watch(isSourceMode, (newVal, oldVal) => {
 
 
 // auto-save
-const { isSaving } = useAutoSave(
+const { isSaving, saveError, forceSave } = useAutoSave(
   () => currentNote.value?.id || null,
   () => localContent.value,
-  async (id, content) => {
-    noteStore.updateNote(id, { content })
+  async (id) => {
     await noteStore.persistNoteNow(id)
   },
   settingStore.settings.autoSaveInterval
 )
 
 // 追踪手势状态
+async function retrySave() {
+  await forceSave()
+  try { await noteStore.flushPendingSave() } catch { /* Retain the error indicator. */ }
+}
+
 let gestureFired = false
 let lastDeltaX = 0
 
@@ -579,13 +572,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('marknote:delete-note', handleVortexDelete)
-  // 在组件卸载前同步源码模式下的内容
-  if (isSourceMode.value && sourceTextareaRef.value && currentNote.value) {
-    // 确保 textarea 的内容同步到 localContent 和 store
-    localContent.value = sourceTextareaRef.value.value
-    noteStore.updateNote(currentNote.value.id, { content: sourceTextareaRef.value.value })
-  }
-
   const editor = document.querySelector('.editor-container')
   if (editor) {
     editor.removeEventListener('wheel', handleWheel as EventListener)
@@ -1068,8 +1054,9 @@ function handleToggleSourceMode() {
         </button>
       </div>
 
+      <button v-if="saveError || noteStore.saveError" class="save-indicator save-error" @click.stop="retrySave" :title="String(saveError || noteStore.saveError)">{{ $t('editor.saveFailedRetry') }}</button>
       <!-- save indicator -->
-      <div v-if="isSaving" class="save-indicator" @click.stop>
+      <div v-else-if="isSaving" class="save-indicator" @click.stop>
         <i class="i-mdi-loading spinning"></i>
       </div>
     </div>
@@ -1752,6 +1739,19 @@ function handleToggleSourceMode() {
   -webkit-backdrop-filter: blur(10px);
   user-select: none;
   -webkit-user-select: none;
+}
+
+.save-error {
+  pointer-events: auto;
+  cursor: pointer;
+  width: auto;
+  min-height: 32px;
+  height: auto;
+  padding: 6px 12px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: var(--color-text);
+  font: inherit;
 }
 
 .spinning {

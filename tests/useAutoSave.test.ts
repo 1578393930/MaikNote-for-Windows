@@ -85,4 +85,29 @@ describe('useAutoSave', () => {
     await api.forceSave()
     expect(saveFn).toHaveBeenCalledWith('n1', '新内容')
   })
+
+  it('pending edits retain their note identity across navigation', async () => {
+    const id = ref<string | null>('a')
+    const text = ref('original A')
+    const save = vi.fn().mockResolvedValue(undefined)
+    mountAutoSave(() => id.value, () => text.value, save)
+    text.value = 'edited A'
+    await nextTick()
+    id.value = 'b'
+    text.value = 'original B'
+    await vi.advanceTimersByTimeAsync(150)
+    expect(save.mock.calls).toEqual([['a', 'edited A']])
+  })
+
+  it('retains failed content for an explicit retry', async () => {
+    const text = ref('original')
+    const save = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockResolvedValue(undefined)
+    const api = mountAutoSave(() => 'a', () => text.value, save)
+    text.value = ''
+    await vi.advanceTimersByTimeAsync(150)
+    expect(api.saveError.value?.message).toBe('disk full')
+    await api.forceSave()
+    expect(save.mock.calls).toEqual([['a', ''], ['a', '']])
+    expect(api.saveError.value).toBeNull()
+  })
 })

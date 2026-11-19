@@ -7,6 +7,7 @@ pub mod skills_sync;
 pub mod tray;
 pub mod webdav;
 pub mod workspace;
+pub mod window_drag;
 
 use std::collections::HashMap;
 use std::fs;
@@ -1102,26 +1103,17 @@ async fn move_note_file(
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    // 目标已存在（同名笔记）时不覆盖，加序号
-    let mut final_dest = dest.clone();
-    if final_dest.exists() {
-        let stem = dest
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("未命名")
-            .to_string();
-        let mut i = 2;
-        loop {
-            let candidate = dest.with_file_name(format!("{} {}.md", stem, i));
-            if !candidate.exists() {
-                final_dest = candidate;
-                break;
-            }
-            i += 1;
+    // The caller tracks the requested filename. Never silently pick another path.
+    if dest.exists() {
+        let same_file = matches!(
+            (fs::canonicalize(&src), fs::canonicalize(&dest)),
+            (Ok(source), Ok(target)) if source == target
+        );
+        if !same_file {
+            return Err(format!("Destination already exists: {}", target_name));
         }
     }
-
-    fs::rename(&src, &final_dest).map_err(|e| e.to_string())
+    fs::rename(&src, &dest).map_err(|e| e.to_string())
 }
 
 /// 迁移：把老布局（note_<id>.md、以目录 id 命名的扁平文件夹）改造成真实名字布局
@@ -2722,6 +2714,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            window_drag::start_window_drag,
             desktop_note::desktop_note_open,
             desktop_note::desktop_note_close,
             desktop_note::desktop_note_list,

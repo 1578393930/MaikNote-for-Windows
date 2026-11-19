@@ -1,16 +1,6 @@
 import { ref, watch, onUnmounted } from 'vue'
-import { useDebounceFn } from '@vueuse/core'
 
-/**
- * 编辑器自动保存。
- *
- * 正确性要点（都修过 bug，别轻易改回去）：
- * - 空内容也要保存：清空正文后磁盘必须跟着空，否则旧内容会在重开时「复活」；
- * - 基线（磁盘上的内容）用「本次改动前的值」推断，而不是从空串起步：
- *   打开笔记后立刻清空，同样要能落盘；
- * - forceSave 必须绕过防抖直接落盘：卸载时 VueUse 会取消挂起的防抖调用，
- *   关窗前最后几百毫秒的编辑只能靠它保住。
- */
+/** Capture the note identity when an edit occurs; serialize pending writes. */
 export function useAutoSave(
   noteId: () => string | null,
   content: () => string,
@@ -19,61 +9,36 @@ export function useAutoSave(
 ) {
   const isSaving = ref(false)
   const saveError = ref<Error | null>(null)
-  /** 最近一次成功落盘的内容；null = 本次会话还没存过 */
-  let lastSavedContent: string | null = null
-  /** 最近一次改动前的值（磁盘基线的最佳估计） */
-  let pendingPrev: string | null = null
+  const pending = new Map<string, string>()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let running: Promise<void> | null = null
 
-  async function runSave(next: string, prev: string) {
-    const id = noteId()
-    if (!id) return
-    // 基线：优先用已保存内容，其次用改动前的值
-    const baseline = lastSavedContent ?? prev
-    if (next === baseline) {
-      lastSavedContent = next
-      pendingPrev = null
-      return
-    }
+  watch(() => [noteId(), content()] as const, ([id, text], [oldId, oldText]) => {
+    if (!id || id !== oldId || text === oldText) return
+    pending.set(id, text)
+    clearTimeout(timer)
+    timer = setTimeout(() => { void forceSave() }, delay)
+  })
 
+  async function forceSave(): Promise<void> {
+    clearTimeout(timer)
+    if (running) { await running; return forceSave() }
     isSaving.value = true
-    saveError.value = null
-
-    try {
-      await saveFn(id, next)
-      lastSavedContent = next
-      pendingPrev = null
-    } catch (e) {
-      saveError.value = e as Error
-      console.error('Auto-save failed:', e)
-    } finally {
-      isSaving.value = false
-    }
+    running = (async () => {
+      for (const [id, text] of Array.from(pending)) {
+        try {
+          await saveFn(id, text)
+          if (pending.get(id) === text) pending.delete(id)
+        } catch (e) {
+          saveError.value = e instanceof Error ? e : new Error(String(e))
+          return
+        }
+      }
+      saveError.value = null
+    })()
+    try { await running } finally { running = null; isSaving.value = false }
   }
 
-  const debouncedSave = useDebounceFn((next?: string, prev?: string) => {
-    void runSave(next ?? content(), prev ?? content())
-  }, delay)
-
-  // Watch content changes
-  watch(content, (next, prev) => {
-    pendingPrev = prev
-    debouncedSave(next, prev)
-  })
-
-  // 绕过防抖立即落盘（关窗 / 卸载 / 手动保存）
-  async function forceSave() {
-    await runSave(content(), pendingPrev ?? content())
-  }
-
-  // Cleanup
-  onUnmounted(() => {
-    // Save on unmount
-    void forceSave()
-  })
-
-  return {
-    isSaving,
-    saveError,
-    forceSave,
-  }
+  onUnmounted(() => { void forceSave() })
+  return { isSaving, saveError, forceSave }
 }

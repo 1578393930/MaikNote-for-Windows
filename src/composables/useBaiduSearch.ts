@@ -5,12 +5,13 @@ const BAIDU_SEARCH_URL = 'https://qianfan.baidubce.com/v2/ai_search/mcp'
 /**
  * 发送 MCP 请求（带 id，等待响应）
  */
-async function mcpRequest(method: string, params: unknown, apiKey: string): Promise<unknown> {
+async function mcpRequest(method: string, params: unknown, apiKey: string, signal?: AbortSignal): Promise<unknown> {
   const id = crypto.randomUUID()
   const body = { jsonrpc: '2.0', id, method, params }
 
   console.log(`[BaiduSearch] MCP 请求:`, JSON.stringify({ method, id }).slice(0, 200))
   const response = await fetch(BAIDU_SEARCH_URL, {
+    signal,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -38,11 +39,12 @@ async function mcpRequest(method: string, params: unknown, apiKey: string): Prom
 /**
  * 发送 MCP 通知（无 id，不等待响应）
  */
-async function mcpNotify(method: string, params: unknown, apiKey: string): Promise<void> {
+async function mcpNotify(method: string, params: unknown, apiKey: string, signal?: AbortSignal): Promise<void> {
   const body = { jsonrpc: '2.0', method, params }
 
   console.log(`[BaiduSearch] MCP 通知:`, method)
   const response = await fetch(BAIDU_SEARCH_URL, {
+    signal,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -64,6 +66,7 @@ export async function callBaiduSearch(
   query: string,
   apiKey: string,
   options?: {
+    signal?: AbortSignal
     model?: string
     instruction?: string
     temperature?: number
@@ -78,27 +81,30 @@ export async function callBaiduSearch(
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'maiknote', version: '1.0' },
-    }, apiKey)
+    }, apiKey, options?.signal)
 
     // Step 2: 发送 initialized 通知（无 id，不等待响应）
     console.log('[BaiduSearch] 发送 initialized 通知...')
-    await mcpNotify('notifications/initialized', {}, apiKey)
+    await mcpNotify('notifications/initialized', {}, apiKey, options?.signal)
 
     // Step 3: 查询可用工具
     console.log('[BaiduSearch] 查询工具列表...')
     let toolName = 'AIsearch'
     try {
-      const toolsResult = await mcpRequest('tools/list', {}, apiKey) as { tools?: Array<{ name: string }> }
+      options?.signal?.throwIfAborted()
+      const toolsResult = await mcpRequest('tools/list', {}, apiKey, options?.signal) as { tools?: Array<{ name: string }> }
       if (toolsResult?.tools?.length) {
         toolName = toolsResult.tools[0].name
         console.log('[BaiduSearch] 发现工具:', toolName)
       }
     } catch {
+      options?.signal?.throwIfAborted()
       console.log('[BaiduSearch] tools/list 失败，使用默认工具名 AIsearch')
     }
 
     // Step 4: 调用搜索工具
     console.log('[BaiduSearch] 调用工具:', toolName, 'query:', query)
+    options?.signal?.throwIfAborted()
     const result = await mcpRequest('tools/call', {
       name: toolName,
       arguments: {
@@ -109,7 +115,7 @@ export async function callBaiduSearch(
         ...(options?.top_p !== undefined && { top_p: options.top_p }),
         ...(options?.resource_type_filter && { resource_type_filter: options.resource_type_filter }),
       },
-    }, apiKey) as { content?: Array<{ type: string; text: string }>; isError?: boolean }
+    }, apiKey, options?.signal) as { content?: Array<{ type: string; text: string }>; isError?: boolean }
 
     if (result?.isError) {
       throw new Error('搜索返回错误')

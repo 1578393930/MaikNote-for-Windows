@@ -68,6 +68,7 @@ export function useFileSystem() {
       await safeInvoke('write_metadata', { basePath: path, content })
     } catch (e) {
       console.error('Failed to write metadata:', e)
+      throw e
     }
   }
 
@@ -97,6 +98,7 @@ export function useFileSystem() {
       await safeInvoke('write_note', args)
     } catch (e) {
       console.error(`Failed to write note ${fileName}:`, e)
+      throw e
     }
   }
 
@@ -183,6 +185,7 @@ export function useFileSystem() {
       await safeInvoke('move_note_file', args)
     } catch (e) {
       console.error(`Failed to move note file ${fileName}:`, e)
+      throw e
     }
   }
 
@@ -286,6 +289,7 @@ export function useFileSystem() {
       await safeInvoke('write_directories', { basePath: path, content })
     } catch (e) {
       console.error('Failed to write directories:', e)
+      throw e
     }
   }
 

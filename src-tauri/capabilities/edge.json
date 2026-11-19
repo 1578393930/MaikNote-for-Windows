@@ -7,6 +7,14 @@
     "core:default",
     "core:window:allow-hide",
     "core:window:allow-show",
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" }
+      ]
+    },
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text"
   ]

@@ -1,4 +1,5 @@
 export default {
+  'editor.saveFailedRetry': '保存失败，点击重试',
   'app.loading': '加载中...',
   'app.updateFound': '发现新版本 v{version}',
   'app.download': '下载更新',
@@ -614,6 +615,7 @@ export default {
   'slash.quote': '引用',
   'slash.code': '代码块',
   'slash.table': '表格',
+  'editor.deleteTable': '删除表格',
   'slash.noMatch': '无匹配命令',
   'slash.searchEmoji': '搜索 emoji...',
   'slash.backToCommands': '返回命令列表',

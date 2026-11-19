@@ -73,7 +73,7 @@ export const useNoteStore = defineStore('note', () => {
   function isFileNameTaken(dirId: string | null | undefined, fileName: string, exceptId?: string): boolean {
     const target = dirId ?? null
     return notes.value.some(
-      n => n.id !== exceptId && (n.directoryId ?? null) === target && noteFile(n) === fileName
+      n => n.id !== exceptId && (n.directoryId ?? null) === target && noteFile(n).toLowerCase() === fileName.toLowerCase()
     )
   }
 
@@ -82,8 +82,9 @@ export const useNoteStore = defineStore('note', () => {
     if (!isFileNameTaken(dirId, desired, exceptId)) return desired
     const stem = desired.replace(/\.md$/i, '')
     let i = 2
-    while (isFileNameTaken(dirId, `${stem} ${i}.md`, exceptId)) i++
-    return `${stem} ${i}.md`
+    const candidate = () => `${Array.from(stem).slice(0, 60 - String(i).length - 1).join('')} ${i}.md`
+    while (isFileNameTaken(dirId, candidate(), exceptId)) i++
+    return candidate()
   }
 
   /** 把一条笔记的文件同步到磁盘：标题改名会顺手重命名文件 */
@@ -227,6 +228,8 @@ export const useNoteStore = defineStore('note', () => {
   // ============================================
 
   // Debounced save state
+  const saveError = ref<Error | null>(null)
+  let activeSave: Promise<void> | null = null
   let saveTimeout: number | null = null
   const pendingSaveNotes = new Set<string>()
   let metadataSavePending = false
@@ -245,7 +248,7 @@ export const useNoteStore = defineStore('note', () => {
       clearTimeout(saveTimeout)
     }
 
-    saveTimeout = setTimeout(() => void runPendingSave(), 500) as unknown as number
+    saveTimeout = setTimeout(() => { void runPendingSave().catch(() => {}) }, 500) as unknown as number
   }
 
   /** 立刻把待保存内容落盘（切换工作空间前必须调用，否则会写进新空间的目录） */
@@ -254,36 +257,40 @@ export const useNoteStore = defineStore('note', () => {
       clearTimeout(saveTimeout)
       saveTimeout = null
     }
-    if (pendingSaveNotes.size === 0 && !metadataSavePending) return
-    await runPendingSave()
+    if (!activeSave && pendingSaveNotes.size === 0 && !metadataSavePending) return
+    do { await runPendingSave() } while (pendingSaveNotes.size || metadataSavePending)
   }
 
   async function runPendingSave(): Promise<void> {
+    if (activeSave) {
+      await activeSave
+      if (pendingSaveNotes.size || metadataSavePending) await runPendingSave()
+      return
+    }
     saveTimeout = null
-    // Save all pending notes
-    const notesToSave = Array.from(pendingSaveNotes)
-      .map(id => notes.value.find(n => n.id === id))
-      .filter((n): n is Note => n !== undefined)
-
-    for (const note of notesToSave) {
-      try {
-        await syncNoteFileToDisk(note)
-      } catch (e) {
-        console.error('Failed to save note to iCloud:', e)
-      }
-    }
-
-    // Save metadata if any note changed or metadata explicitly requested
-    if (notesToSave.length > 0 || metadataSavePending) {
-      try {
-        await saveMetadataToCloud()
-      } catch (e) {
-        console.error('Failed to save metadata to iCloud:', e)
-      }
-    }
-
-    pendingSaveNotes.clear()
+    const ids = Array.from(pendingSaveNotes)
+    ids.forEach(id => pendingSaveNotes.delete(id))
+    const needsMetadata = metadataSavePending || ids.length > 0
     metadataSavePending = false
+    activeSave = (async () => {
+      let failure: unknown = null
+      for (const id of ids) {
+        const note = notes.value.find(n => n.id === id)
+        if (!note) continue
+        try { await syncNoteFileToDisk(note) }
+        catch (e) { pendingSaveNotes.add(id); failure = e }
+      }
+      if (needsMetadata) {
+        try { await saveMetadataToCloud() }
+        catch (e) { metadataSavePending = true; failure = e }
+      }
+      if (failure) {
+        saveError.value = failure instanceof Error ? failure : new Error(String(failure))
+        throw saveError.value
+      }
+      saveError.value = null
+    })()
+    try { await activeSave } finally { activeSave = null }
   }
 
   /**
@@ -305,11 +312,11 @@ export const useNoteStore = defineStore('note', () => {
       let name = item.fileName ?? fileNameForTitle(item.title)
       const stem = name.replace(/\.md$/i, '')
       let i = 2
-      while (set.has(name)) {
-        name = `${stem} ${i}.md`
+      while (set.has(name.toLowerCase())) {
+        name = `${Array.from(stem).slice(0, 60 - String(i).length - 1).join('')} ${i}.md`
         i++
       }
-      set.add(name)
+      set.add(name.toLowerCase())
       item.fileName = name
       return {
         id: item.id,
@@ -440,16 +447,8 @@ export const useNoteStore = defineStore('note', () => {
    * Save a single note to iCloud immediately (for new notes)
    */
   async function saveNoteToCloud(note: Note): Promise<void> {
-    try {
-      // Save content to file（目录 / 文件名都按真实名字）
-      await syncNoteFileToDisk(note)
-
-      // Update metadata
-      await saveMetadataToCloud()
-    } catch (e) {
-      console.error('Failed to save note to iCloud:', e)
-      throw e
-    }
+    pendingSaveNotes.add(note.id)
+    await flushPendingSave()
   }
 
   /**
@@ -458,12 +457,8 @@ export const useNoteStore = defineStore('note', () => {
   async function persistNoteNow(id: string): Promise<void> {
     const note = notes.value.find(n => n.id === id)
     if (!note) return
-    try {
-      await syncNoteFileToDisk(note)
-      await saveMetadataToCloud()
-    } catch (e) {
-      console.error('Failed to persist note now:', e)
-    }
+    pendingSaveNotes.add(id)
+    await flushPendingSave()
   }
 
   /**
@@ -1154,7 +1149,7 @@ export const useNoteStore = defineStore('note', () => {
    */
   async function renameNoteFile(noteId: string, rawName: string): Promise<boolean> {
     const note = notes.value.find(n => n.id === noteId)
-    if (!note) return false
+    if (!note || note.isLocked) return false
     const trimmed = String(rawName ?? '').replace(/\.md$/i, '').trim()
     if (!trimmed) return false
     const stem = sanitizePathSegment(trimmed)
@@ -1165,6 +1160,7 @@ export const useNoteStore = defineStore('note', () => {
     try {
       await fs.moveNoteFile(from, dir, dir, desired)
     } catch (err) {
+      saveError.value = err instanceof Error ? err : new Error(String(err))
       console.error('[rename-note] 重命名文件失败:', err)
       return false
     }
@@ -1172,14 +1168,8 @@ export const useNoteStore = defineStore('note', () => {
     note.content = replaceTitleLine(note.content, stem)
     note.title = extractTitle(note.content)
     note.updatedAt = Date.now()
-    // 标题行改过了，把新内容写进改名后的文件
-    try {
-      await fs.writeNote(desired, note.content, dir ?? undefined)
-    } catch (err) {
-      console.error('[rename-note] 写入内容失败:', err)
-    }
-    await saveMetadataToCloud()
-    return true
+    pendingSaveNotes.add(note.id)
+    try { await flushPendingSave(); return true } catch { return false }
   }
 
   /**
@@ -1308,6 +1298,7 @@ export const useNoteStore = defineStore('note', () => {
     loadNotes,
     saveNoteToCloud,
     persistNoteNow,
+    saveError,
     saveMetadataToCloud,
   }
 })

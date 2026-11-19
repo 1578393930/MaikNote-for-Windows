@@ -14,6 +14,7 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import Image from '@tiptap/extension-image'
 import { useSettingStore } from '@/stores/settingStore'
 import { useAssistantsStore } from '@/stores/assistantsStore'
+import { consumeAiResponse } from '@/utils/aiResponse'
 import { callBaiduSearch } from '@/composables/useBaiduSearch'
 import { all, createLowlight } from 'lowlight'
 import { createSlashCommand } from './extensions/SlashCommandExtension'
@@ -52,6 +53,8 @@ import { EmptyLineNormalizer } from './extensions/EmptyLineNormalizer'
 import { readText } from '@tauri-apps/plugin-clipboard-manager'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { copyText } from '@/utils/clipboard'
+import { findTableTarget, deleteTargetTable, type TableTarget } from './tableActions'
+import { requestAiChat } from '@/utils/aiRequest'
 
 const lowlight = createLowlight(all)
 
@@ -275,7 +278,7 @@ const emit = defineEmits<{
   update: [markdown: string]
 }>()
 
-const imeDebugEnabled = () => (window as any).__maiknoteImeDebug !== false
+const imeDebugEnabled = () => (window as any).__maiknoteImeDebug === true
 
 const describeDomNode = (node: Node | null): string | null => {
   if (!node) return null
@@ -558,6 +561,8 @@ let rightClickSnapshot: { from: number; to: number } | null = null
 let savedSelectionRange: { from: number; to: number } | null = null
 const hasClipboardText = ref(false) // 剪贴板是否有文本（控制「粘贴」项显示）
 const contextMenuLinkHref = ref('') // 右键点中的链接地址（空串表示不是链接）
+const contextMenuHasTable = ref(false)
+let contextMenuTableTarget: TableTarget | null = null
 
 // AI 相关：先生成到预览面板，用户确认后才写入笔记
 const isAILoading = ref(false)
@@ -619,6 +624,7 @@ function stopAI() {
 }
 // 右键菜单处理
 function handleContextMenu(e: MouseEvent) {
+  if (!(e.target instanceof Node) || !editor.value?.view.dom.contains(e.target)) return
   // 左侧文件树有自己的右键菜单，交给它处理（本监听器挂在 document 捕获阶段，必须在这里放行）
   if ((e.target as HTMLElement | null)?.closest?.('[data-filetree]')) {
     return
@@ -633,6 +639,8 @@ function handleContextMenu(e: MouseEvent) {
   // 记录右键是否点在链接上（决定菜单里是否出现「打开链接 / 复制链接地址」）
   const anchor = (e.target as HTMLElement | null)?.closest?.('a')
   contextMenuLinkHref.value = anchor?.getAttribute('href') || ''
+  contextMenuTableTarget = editor.value ? findTableTarget(editor.value, e.target) : null
+  contextMenuHasTable.value = contextMenuTableTarget !== null
 
   // 使用右键点击前的选区快照（handleContextMenu 在 capture 阶段触发时，
   // macOS WebKit 可能已经在底层原生层面修改了 DOM 选区，故不能信任当前值）
@@ -709,8 +717,20 @@ function hideContextMenu() {
   contextMenuVisible.value = false
   savedSelectionText.value = ''
   contextMenuLinkHref.value = ''
+  contextMenuHasTable.value = false
+  contextMenuTableTarget = null
   rightClickSnapshot = null
   savedSelectionRange = null
+}
+
+function deleteContextMenuTable() {
+  const ed = editor.value
+  const target = contextMenuTableTarget
+  hideContextMenu()
+  if (ed && target && !props.isLocked) {
+    deleteTargetTable(ed, target)
+    ed.view.focus()
+  }
 }
 
 // 复制选中内容（Markdown 源码，与 Cmd+C 一致）
@@ -930,7 +950,7 @@ function scrollAiPreviewToBottom() {
 // 右键菜单点了某个助手：只确定处理范围和原文，文档一个字都不改
 function handleAI(assistantId: string) {
   const ed = editor.value
-  if (!ed) return
+  if (!ed || props.isLocked || !ed.isEditable) return
 
   const assistant = assistantsStore.getAssistantById(assistantId)
   const range = savedSelectionRange ?? { from: ed.state.selection.from, to: ed.state.selection.to }
@@ -991,6 +1011,10 @@ async function callAI(assistantId: string) {
   const prompt = String(assistant.prompt || '')
   const text = aiInputText
 
+  const controller = new AbortController()
+  aiAbortController = controller
+  const signal = controller.signal
+  const isCurrent = () => !disposed && !signal.aborted && aiAbortController === controller
   aiPreviewStatus.value = 'streaming'
   isAILoading.value = true
 
@@ -1002,7 +1026,9 @@ async function callAI(assistantId: string) {
       const searchQuery = buildSearchQuery(text)
       const searchResult = await callBaiduSearch(searchQuery, settingStore.settings.baiduSearchKey, {
         resource_type_filter: [{ type: 'web', top_k: 5 }],
+        signal,
       })
+      if (!isCurrent()) return
       if (searchResult.trim()) {
         aiPreviewSearch.value = 'used'
         searchContext = `\n\n以下是与用户问题相关的互联网搜索结果（仅供事实参考，请基于搜索结果和你的知识综合回答）：\n${searchResult}\n\n请基于以上搜索结果和你的知识，完成用户请求。`
@@ -1012,78 +1038,31 @@ async function callAI(assistantId: string) {
         showToast(t('toast.searchEmpty'))
       }
     } catch (e) {
+      if (!isCurrent()) return
       console.error('[BaiduSearch] 搜索失败:', e)
       aiPreviewSearch.value = 'failed'
       showToast(t('toast.searchSkipped', { error: e instanceof Error ? e.message : 'Unknown error' }))
     }
   }
 
-  aiAbortController = new AbortController()
-  const signal = aiAbortController.signal
+  if (!isCurrent()) return
 
   try {
-    const response = await fetch(`${settingStore.settings.aiUrl}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settingStore.settings.aiKey}`
-      },
-      body: JSON.stringify({
-        model: settingStore.settings.aiModel,
-        messages: [
-          { role: 'system', content: '你是一个笔记助手, 协助用户完成文字处理，严格遵守用户的规则！' },
-          { role: 'user', content: `${prompt}\n\n${text}${searchContext}` }
-        ],
-        temperature: 0.7,
-        stream: true
-      }),
-      signal
-    })
+    const response = await requestAiChat({
+      url: settingStore.settings.aiUrl,
+      key: settingStore.settings.aiKey,
+      model: settingStore.settings.aiModel,
+    }, [
+      { role: 'system', content: '你是一个笔记助手, 协助用户完成文字处理，严格遵守用户的规则！' },
+      { role: 'user', content: `${prompt}\n\n${text}${searchContext}` }
+    ], signal)
 
-    if (!response.ok) {
-      throw new Error(`API错误: ${response.status}`)
-    }
-
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('无法读取响应流')
-    }
-
-    const decoder = new TextDecoder()
-    // SSE 的一行可能被网络切片劈成两半：必须留缓冲，否则被劈开的那条 delta 会整条丢掉（表现为随机少字）
-    let sseBuffer = ''
-
-    const consumeSseLine = (rawLine: string) => {
-      const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
-      if (!line.startsWith('data:')) return
-      const data = line.slice(5).trim()
-      if (!data || data === '[DONE]') return
-      try {
-        const parsed = JSON.parse(data)
-        const choice = parsed.choices?.[0]
-        const piece = choice?.delta?.content ?? choice?.message?.content ?? choice?.text
-        if (typeof piece === 'string' && piece) {
-          aiPreviewText.value += piece
-          if (/[\[\]□☐]/.test(piece)) {
-            aiPreviewText.value = normalizeTaskMarkdown(aiPreviewText.value)
-          }
-          scrollAiPreviewToBottom()
-        }
-      } catch {
-        // 单条事件解析失败就跳过这一条，不影响后面的内容
-      }
-    }
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      sseBuffer += decoder.decode(value, { stream: true })
-      const lines = sseBuffer.split('\n')
-      sseBuffer = lines.pop() ?? ''
-      for (const line of lines) consumeSseLine(line)
-    }
-    // 流结束时最后一行可能没有换行收尾
-    consumeSseLine(sseBuffer + decoder.decode())
+    await consumeAiResponse(response, piece => {
+      if (!isCurrent()) return
+      aiPreviewText.value += piece
+      scrollAiPreviewToBottom()
+    }, signal)
+    if (!isCurrent()) return
 
     aiPreviewText.value = normalizeTaskMarkdown(
       aiPreviewText.value.replace(/^[\s\u200b]+/, '').trimEnd()
@@ -1095,17 +1074,21 @@ async function callAI(assistantId: string) {
       aiPreviewError.value = t('toast.aiEmptyResult')
     }
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (!isCurrent()) return
+    // 原生 HTTP 插件取消时可能抛出字符串，而不是 AbortError。
+    if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
       aiPreviewStatus.value = aiPreviewText.value ? 'done' : 'idle'
       return
     }
     console.error('AI调用失败:', error)
-    aiPreviewError.value = error instanceof Error ? error.message : 'Unknown error'
+    aiPreviewError.value = error instanceof Error ? error.message : String(error)
     aiPreviewStatus.value = 'error'
     showToast(t('toast.aiFailed', { error: aiPreviewError.value }))
   } finally {
-    isAILoading.value = false
-    aiAbortController = null
+    if (aiAbortController === controller) {
+      isAILoading.value = false
+      aiAbortController = null
+    }
   }
 }
 
@@ -1168,7 +1151,7 @@ function markdownToHtml(markdown: string): string {
 function insertAiTextAt(anchor: number): boolean {
   const ed = editor.value
   const text = aiPreviewText.value.trim()
-  if (!ed || !text) return false
+  if (!ed || !text || props.isLocked || !ed.isEditable) return false
   ed.chain().focus().insertContentAt(anchor, markdownToHtml('\n\n' + text)).run()
   emitEditorUpdate()
   closeAiPreview()
@@ -1184,7 +1167,7 @@ function insertAiAtCursor() {
 function applyAiReplace() {
   const ed = editor.value
   const text = normalizeTaskMarkdown(aiPreviewText.value).trim()
-  if (!ed || !text) return
+  if (!ed || !text || props.isLocked || !ed.isEditable) return
 
   if (aiTargetStale()) {
     // 位置已失效：退化成插入，绝不覆盖用户刚写的内容
@@ -2474,6 +2457,7 @@ const editor = useEditor({
       return false
     },
     handleKeyDown(view, event) {
+      if (event.key === 'Tab' && (event.isComposing || editor.value?.isActive('table'))) return false
       if (event.key === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
         event.preventDefault()
         const { state, dispatch } = view
@@ -2835,8 +2819,11 @@ watch(() => settingStore.settings.linkPreviewEnabled, () => {
   refreshLinkPreview(editor.value?.view)
 })
 
+let disposed = false
+let stopBackgroundWatch: (() => void) | undefined
 onMounted(async () => {
   await assistantsStore.loadAssistants()
+  if (disposed) return
   // 从 iCloud 同步 AI 配置到设置
   if (assistantsStore.aiConfigExists) {
     settingStore.settings.aiUrl = assistantsStore.aiUrl
@@ -2853,83 +2840,7 @@ onMounted(async () => {
   // Esc 关闭 AI 预览面板
   window.addEventListener('keydown', handleAiPreviewEsc, true)
 
-  /* ----- TEMP: 中文输入法下代码块被销毁的现场抓取（定位后删除） ----- */
-  const imeTrace: any[] = []
-  const tracePush = (kind: string, extra: Record<string, unknown> = {}) => {
-    imeTrace.push({ at: Math.round(performance.now()), kind, ime: (window as any).__imeComposing === true, ...extra })
-    if (imeTrace.length > 150) imeTrace.shift()
-  }
-  const docOutline = (doc: any) => {
-    const out: string[] = []
-    doc.descendants((n: any, p: number) => {
-      out.push(n.type.name + '@' + p + (n.isText ? '=' + JSON.stringify(n.text) : ''))
-      return true
-    })
-    return out
-  }
-  const countCodeBlocks = (doc: any) => {
-    let n = 0
-    doc.descendants((node: any) => {
-      if (node.type.name === 'codeBlock') n += 1
-      return true
-    })
-    return n
-  }
-  let lastCodeBlockCount = -1
-  const dumpImeTrace = (reason: string, extra: Record<string, unknown> = {}) => {
-    const ed = editor.value
-    if (!ed) return
-    const payload = {
-      reason,
-      at: new Date().toISOString(),
-      outline: docOutline(ed.state.doc),
-      html: (ed.view.dom as HTMLElement).innerHTML.slice(0, 4000),
-      trace: imeTrace.slice(-90),
-      ...extra,
-    }
-    console.warn('[ime-trace] ' + reason, JSON.stringify(payload))
-  }
-  ;['keydown', 'compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input'].forEach((name) => {
-    document.addEventListener(
-      name,
-      (event: any) => {
-        tracePush(name, {
-          key: event.key,
-          keyCode: event.keyCode,
-          isComposing: event.isComposing,
-          data: typeof event.data === 'string' ? event.data : null,
-          inputType: event.inputType,
-          target: event.target?.nodeName,
-        })
-      },
-      true
-    )
-  })
-  const imeTraceHandler = ({ editor: ed, transaction }: any) => {
-    void transaction
-    const now = countCodeBlocks(ed.state.doc)
-    if (lastCodeBlockCount >= 0 && now < lastCodeBlockCount) {
-      dumpImeTrace('codeblock-drop', { before: lastCodeBlockCount, after: now })
-    }
-    lastCodeBlockCount = now
-  }
-  editor.value?.on('transaction', imeTraceHandler)
-  const imeDomCheck = window.setInterval(() => {
-    const ed = editor.value
-    if (!ed) return
-    const docCount = countCodeBlocks(ed.state.doc)
-    const domCount = ed.view.dom.querySelectorAll('pre').length
-    if (docCount !== domCount) {
-      tracePush('dom-mismatch', { docCount, domCount })
-      dumpImeTrace('dom-mismatch', { docCount, domCount })
-    }
-  }, 1200)
   ;(window as any).__editor = editor.value
-  ;(window as any).__imeTraceDump = () => dumpImeTrace('manual')
-  ;(window as any).__imeTraceStop = () => {
-    window.clearInterval(imeDomCheck)
-    editor.value?.off('transaction', imeTraceHandler)
-  }
 
   // 代码块语言按钮浮层：内容变化后重算坐标，滚动/缩放时也要重算
   document.addEventListener('mousedown', handleCodeLangOutsideMouseDown, true)
@@ -2938,6 +2849,7 @@ onMounted(async () => {
   window.addEventListener('scroll', scheduleCodeLangSync, true)
   window.addEventListener('resize', scheduleCodeLangSync)
   await nextTick()
+  if (disposed) return
   syncCodeLangPills()
 
   // 编辑器 DOM 上 capture 阶段拦截右键 mousedown，保存 ProseMirror 选区快照
@@ -2956,7 +2868,7 @@ onMounted(async () => {
   }
 
   // 直接监听背景色变化并设置DOM样式（同时依赖 currentTheme，主题切换后要重算）
-  watchEffect(() => {
+  stopBackgroundWatch = watchEffect(() => {
     const color = adaptedNoteBg.value
     const wrapper = document.querySelector('.tiptap-wrapper') as HTMLElement | null
     if (wrapper) {
@@ -2970,11 +2882,15 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  aiAbortController?.abort()
+  aiAbortController = null
+  stopBackgroundWatch?.()
+  if ((window as any).__editor === editor.value) delete (window as any).__editor
   if (imeUpdateTimer) {
     clearTimeout(imeUpdateTimer)
     imeUpdateTimer = null
   }
-  editor.value?.destroy()
   // 清理编辑器 DOM 级别的右键选区保存
   if (editor.value && (editor.value.view.dom as any)._saveSelectionOnRightMousedown) {
     editor.value.view.dom.removeEventListener(
@@ -2983,6 +2899,7 @@ onUnmounted(() => {
       true
     )
   }
+  editor.value?.destroy()
   document.removeEventListener('contextmenu', handleContextMenu, true)
   document.removeEventListener('click', hideContextMenu)
   document.removeEventListener('mousedown', hideLinkPanelOnOutsideClick, true)
@@ -3278,8 +3195,15 @@ defineExpose({
         ref="contextMenuRef"
         class="context-menu"
         :style="contextMenuStyle"
+        @mousedown.prevent
         @click.stop
       >
+        <template v-if="contextMenuHasTable">
+          <div class="context-menu-item" @click="deleteContextMenuTable">
+            <span>{{ $t('editor.deleteTable') }}</span>
+          </div>
+          <div class="context-menu-divider"></div>
+        </template>
         <template v-if="contextMenuLinkHref">
           <div class="context-menu-item" @click="openContextMenuLink">
             <span>{{ $t('editor.openLink') }}</span>

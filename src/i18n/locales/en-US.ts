@@ -1,4 +1,5 @@
 export default {
+  'editor.saveFailedRetry': 'Save failed. Click to retry',
   'app.loading': 'Loading...',
   'app.updateFound': 'New version v{version} found',
   'app.download': 'Update',
@@ -614,6 +615,7 @@ export default {
   'slash.quote': 'Quote',
   'slash.code': 'Code',
   'slash.table': 'Table',
+  'editor.deleteTable': 'Delete table',
   'slash.noMatch': 'No matching commands',
   'slash.searchEmoji': 'Search emoji...',
   'slash.backToCommands': 'Back to commands',

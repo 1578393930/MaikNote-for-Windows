@@ -19,6 +19,7 @@ import { useWebDavSync } from '@/composables/useWebDavSync'
 import { syncAppIcon } from '@/composables/useAppIcon'
 import { useI18n } from 'vue-i18n'
 import { isNativeDialogCurrentlyOpen } from '@/stores/dialogStore'
+import { isWindowDragAutoHideSuppressed } from '@/utils/windowDrag'
 import TitleBar from '@/components/TitleBar/TitleBar.vue'
 import Editor from '@/components/Editor/MilkdownEditor.vue'
 import Settings from '@/components/Settings/Settings.vue'
@@ -317,6 +318,7 @@ onMounted(async () => {
       && !settingStore.settings.alwaysOnTop
       && !isNativeDialogCurrentlyOpen()
       && !isMainAutoHideSuppressed()
+      && !isWindowDragAutoHideSuppressed()
       // 首次启动还没走完引导：窗口常显，别让用户对着空桌面发呆
       && !isFirstRun.value
       // 快捷键练习期间窗口也得杵着，等用户亲手收起

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { PhysicalPosition } from '@tauri-apps/api/dpi'
+import { startWindowDrag } from '@/utils/windowDrag'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { useNoteStore, extractTitle } from '@/stores/noteStore'
@@ -52,12 +52,14 @@ const isVisible = ref(false)
 
 // 点击标题栏文件名可直接重命名（文件名 + 正文标题行一起改）
 const renaming = ref(false)
+let renameNoteId: string | null = null
 const renameDraft = ref('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
 
 function startRename() {
   const note = noteStore.currentNote
-  if (!note) return
+  if (!note || note.isLocked) return
+  renameNoteId = note.id
   renameDraft.value = displayTitle.value || noteTitle.value || note.fileName?.replace(/\.md$/i, '') || ''
   renaming.value = true
   // 编辑期间不要让标题栏因鼠标离开而消失
@@ -73,7 +75,7 @@ async function commitRename() {
   const note = noteStore.currentNote
   const name = renameDraft.value.trim()
   renaming.value = false
-  if (!note || !name || name === displayTitle.value) return
+  if (!note || note.isLocked || note.id !== renameNoteId || !name || name === displayTitle.value) return
   await noteStore.renameNoteFile(note.id, name)
 }
 
@@ -89,7 +91,6 @@ function showTitleBar() {
 }
 
 function hideTitleBar() {
-  if (dragState) return
   if (renaming.value) return
   if (isPinned.value) return
   if (settingStore.settings.titleBarBehavior === 'always-show') return
@@ -183,68 +184,19 @@ function openSettings() {
   emit('openSettings')
 }
 
-let dragState = false
-let dragWinX = 0
-let dragWinY = 0
-let dragStartX = 0
-let dragStartY = 0
-let lastScreenX = 0
-let lastScreenY = 0
-let rafId = 0
-
 async function startDrag(e: MouseEvent) {
   if ((e.target as HTMLElement).closest('button, input, .window-controls, .right-actions')) {
     return
   }
-  if (e.buttons !== 1 || !appWindow) return
-
-  const dpr = window.devicePixelRatio || 1
-  const pos = await appWindow.outerPosition()
-
-  dragWinX = pos.x
-  dragWinY = pos.y
-  dragStartX = e.screenX * dpr
-  dragStartY = e.screenY * dpr
-  lastScreenX = dragStartX
-  lastScreenY = dragStartY
-  dragState = true
-  rafId = requestAnimationFrame(updateWindowPosition)
-}
-
-function updateWindowPosition() {
-  if (!dragState || !appWindow) return
-
-  const dx = Math.round(lastScreenX - dragStartX)
-  const dy = Math.round(lastScreenY - dragStartY)
-  appWindow.setPosition(new PhysicalPosition(dragWinX + dx, dragWinY + dy))
-  rafId = requestAnimationFrame(updateWindowPosition)
-}
-
-function onDragMove(e: MouseEvent) {
-  if (!dragState) return
-
-  const dpr = window.devicePixelRatio || 1
-  lastScreenX = e.screenX * dpr
-  lastScreenY = e.screenY * dpr
-}
-
-function onDragEnd() {
-  dragState = false
-  if (rafId) {
-    cancelAnimationFrame(rafId)
-    rafId = 0
+  if (e.button !== 0 || !appWindow) return
+  e.preventDefault()
+  // 立即交给系统捕获鼠标，避免移出 WebView 丢事件、跨屏缩放和异步位置查询竞争。
+  try {
+    await startWindowDrag()
+  } catch (error) {
+    console.error('Window dragging failed:', error)
   }
 }
-
-onMounted(() => {
-  document.addEventListener('mousemove', onDragMove)
-  document.addEventListener('mouseup', onDragEnd)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('mousemove', onDragMove)
-  document.removeEventListener('mouseup', onDragEnd)
-})
 
 </script>
 
@@ -254,6 +206,7 @@ onUnmounted(() => {
     class="title-bar-trigger"
     @mouseenter="showTitleBar"
     @mouseleave="hideTitleBar"
+    @mousedown.self="startDrag"
   >
     <div
       class="title-bar"

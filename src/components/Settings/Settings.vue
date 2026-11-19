@@ -2,7 +2,7 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { PhysicalPosition } from '@tauri-apps/api/dpi'
+import { startWindowDrag } from '@/utils/windowDrag'
 import { useSettingStore, DEFAULT_IP_API_URL, normalizeIpApiUrl, DEFAULT_SHORTCUTS, type ShortcutSettings, type ShortcutScope, type PinOffBehavior, type CodeTheme, type EditorStylePreset, type DesktopNoteLevel } from '@/stores/settingStore'
 import { editorStylePresets } from '@/composables/editorStylePresets'
 import { useAssistantsStore, defaultAssistants, type Assistant } from '@/stores/assistantsStore'
@@ -26,56 +26,16 @@ import { noteColorOptionsFor } from '@/utils/noteColors'
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window)
 const appWindow = isTauri ? getCurrentWindow() : null
 
-let dragState = false
-let dragWinX = 0
-let dragWinY = 0
-let dragStartX = 0
-let dragStartY = 0
-let lastScreenX = 0
-let lastScreenY = 0
-let rafId = 0
-
 async function startDrag(e: MouseEvent) {
   if ((e.target as HTMLElement).closest('button, input, .back-btn, .settings-nav')) {
     return
   }
-  if (e.buttons !== 1 || !appWindow) return
-
-  const dpr = window.devicePixelRatio || 1
-  const pos = await appWindow.outerPosition()
-
-  dragWinX = pos.x
-  dragWinY = pos.y
-  dragStartX = e.screenX * dpr
-  dragStartY = e.screenY * dpr
-  lastScreenX = dragStartX
-  lastScreenY = dragStartY
-  dragState = true
-  rafId = requestAnimationFrame(updateWindowPosition)
-}
-
-function updateWindowPosition() {
-  if (!dragState || !appWindow) return
-
-  const dx = Math.round(lastScreenX - dragStartX)
-  const dy = Math.round(lastScreenY - dragStartY)
-  appWindow.setPosition(new PhysicalPosition(dragWinX + dx, dragWinY + dy))
-  rafId = requestAnimationFrame(updateWindowPosition)
-}
-
-function onDragMove(e: MouseEvent) {
-  if (!dragState) return
-
-  const dpr = window.devicePixelRatio || 1
-  lastScreenX = e.screenX * dpr
-  lastScreenY = e.screenY * dpr
-}
-
-function onDragEnd() {
-  dragState = false
-  if (rafId) {
-    cancelAnimationFrame(rafId)
-    rafId = 0
+  if (e.button !== 0 || !appWindow) return
+  e.preventDefault()
+  try {
+    await startWindowDrag()
+  } catch (error) {
+    console.error('Window dragging failed:', error)
   }
 }
 
@@ -380,15 +340,11 @@ function handleExitKeydown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', blockNoteShortcuts, true)
   window.addEventListener('keydown', handleExitKeydown)
-  document.addEventListener('mousemove', onDragMove)
-  document.addEventListener('mouseup', onDragEnd)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', blockNoteShortcuts, true)
   window.removeEventListener('keydown', handleExitKeydown)
-  document.removeEventListener('mousemove', onDragMove)
-  document.removeEventListener('mouseup', onDragEnd)
   stopFdaPolling()
 })
 
